@@ -1,0 +1,125 @@
+name: MAHAKAL Android Release & GitHub Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Git Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      publish_release:
+        description: 'Publish GitHub Release asset'
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Package Production Android Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Secrets & Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
+        run: |
+          cp .env.example .env
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Production keystore secret detected. Decoding to secure temporary path..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+            echo "KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+          else
+            echo "WARNING: Production keystore secret not found in GitHub Secrets."
+            echo "Building with development signing config or unsigned bundle."
+          fi
+
+      - name: Run Quality & Security Checks
+        run: |
+          echo "Scanning for accidental committed private keys..."
+          ! grep -rE "BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY" app/src/ || exit 1
+          echo "Source security scan passed."
+
+      - name: Run Unit Tests
+        run: |
+          gradle :app:testDebugUnitTest --no-daemon
+
+      - name: Build Android Release APK & AAB
+        run: |
+          # Build release bundle and release APK
+          gradle :app:bundleRelease :app:assembleRelease --no-daemon
+
+      - name: Stage Artifacts & Generate Checksums
+        run: |
+          mkdir -p release-artifacts
+          
+          # Locate built APK and AAB
+          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n 1)
+          
+          if [ -z "$APK_SRC" ]; then
+            echo "APK not found in release directory, checking all build outputs..."
+            APK_SRC=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
+          
+          cp "$APK_SRC" release-artifacts/MAHAKAL-release.apk
+          if [ -n "$AAB_SRC" ]; then
+            cp "$AAB_SRC" release-artifacts/MAHAKAL-release.aab
+          fi
+          
+          cd release-artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+      - name: Upload GitHub Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mahakal-release-binaries
+          path: release-artifacts/*
+          retention-days: 30
+
+      - name: Create or Update GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: "MAHAKAL ${{ github.event.inputs.release_tag || github.ref_name }}"
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          files: |
+            release-artifacts/MAHAKAL-release.apk
+            release-artifacts/MAHAKAL-release.aab
+            release-artifacts/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
