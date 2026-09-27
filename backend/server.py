@@ -38,72 +38,6 @@ class PgConnectionPool:
         self.port = int(port_str or 5432)
         self.dbname = db_part.split('?')[0]
 
-    def _create_connection(self):
-        ais = socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        s = socket.socket(ais[0][0], ais[0][1], ais[0][2])
-        s.settimeout(25.0)
-        s.connect(ais[0][4])
-        # Request SSL
-        s.sendall(struct.pack('!II', 8, 80877103))
-        if s.recv(1) != b'S':
-            raise ConnectionError("PostgreSQL server rejected SSL request")
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ssl_sock = ctx.wrap_socket(s, server_hostname=self.host)
-        # Startup Message
-        params = b'user\x00' + self.user.encode('utf-8') + b'\x00database\x00' + self.dbname.encode('utf-8') + b'\x00\x00'
-        ssl_sock.sendall(struct.pack('!II', 8 + len(params), 196608) + params)
-        ssl_sock.recv(1)
-        l = struct.unpack('!I', ssl_sock.recv(4))[0]
-        ssl_sock.recv(l - 4)
-
-        # SCRAM-SHA-256 Authentication
-        c_nonce = base64.b64encode(os.urandom(18)).decode('ascii')
-        client_first_bare = f'n={self.user},r={c_nonce}'
-        client_first = f'n,,{client_first_bare}'
-        sasl_initial = b'SCRAM-SHA-256\x00' + struct.pack('!I', len(client_first)) + client_first.encode('ascii')
-        ssl_sock.sendall(b'p' + struct.pack('!I', 4 + len(sasl_initial)) + sasl_initial)
-        ssl_sock.recv(1)
-        r_len = struct.unpack('!I', ssl_sock.recv(4))[0]
-        ssl_sock.recv(4)
-        server_first = ssl_sock.recv(r_len - 8).decode('ascii')
-        sf_dict = dict(item.split('=', 1) for item in server_first.split(','))
-        s_nonce = sf_dict['r']
-        salt = base64.b64decode(sf_dict['s'])
-        iterations = int(sf_dict['i'])
-
-        def h(b): return hashlib.sha256(b).digest()
-        def hmac_sha256(key, msg): return hmac.new(key, msg, hashlib.sha256).digest()
-        def xor(b1, b2): return bytes(x ^ y for x, y in zip(b1, b2))
-
-        salted_password = hashlib.pbkdf2_hmac('sha256', self.pwd.encode('utf-8'), salt, iterations, dklen=32)
-        client_key = hmac_sha256(salted_password, b'Client Key')
-        stored_key = h(client_key)
-        client_final_without_proof = f'c=biws,r={s_nonce}'
-        auth_message = f'{client_first_bare},{server_first},{client_final_without_proof}'.encode('ascii')
-        client_signature = hmac_sha256(stored_key, auth_message)
-        client_proof = xor(client_key, client_signature)
-        client_final = f'{client_final_without_proof},p={base64.b64encode(client_proof).decode("ascii")}'
-
-        ssl_sock.sendall(b'p' + struct.pack('!I', 4 + len(client_final)) + client_final.encode('ascii'))
-        ssl_sock.recv(1)
-        f_len = struct.unpack('!I', ssl_sock.recv(4))[0]
-        ssl_sock.recv(f_len - 4)
-        ssl_sock.recv(1)
-        ok_len = struct.unpack('!I', ssl_sock.recv(4))[0]
-        ssl_sock.recv(ok_len - 4)
-
-        while True:
-            t = ssl_sock.recv(1)
-            if not t:
-                break
-            pl = struct.unpack('!I', ssl_sock.recv(4))[0]
-            ssl_sock.recv(pl - 4)
-            if t == b'Z':
-                break
-        return ssl_sock
-
     def _recv_exact(self, sock, n):
         b = bytearray()
         while len(b) < n:
@@ -112,6 +46,134 @@ class PgConnectionPool:
                 raise ConnectionResetError("Connection closed while receiving from PostgreSQL")
             b.extend(chunk)
         return bytes(b)
+
+    def _create_connection(self):
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Resolve both IPv4 and IPv6 addresses
+                ais = socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                if not ais:
+                    raise ConnectionError(f"DNS lookup returned no address for {self.host}")
+
+                # Prioritize IPv4 (AF_INET) over IPv6 (AF_INET6) to support IPv4-only runtimes (e.g. Render)
+                # while preserving seamless IPv6 fallback when IPv4 is unavailable.
+                sorted_ais = sorted(ais, key=lambda x: 0 if x[0] == socket.AF_INET else 1)
+
+                sock = None
+                connect_err = None
+
+                for family, socktype, proto, canonname, sockaddr in sorted_ais:
+                    family_name = "IPv4" if family == socket.AF_INET else "IPv6"
+                    try:
+                        s = socket.socket(family, socktype, proto)
+                        s.settimeout(12.0)
+                        s.connect(sockaddr)
+                        sock = s
+                        break
+                    except OSError as e:
+                        connect_err = e
+                        if s:
+                            try:
+                                s.close()
+                            except:
+                                pass
+                        # Continue to next candidate address
+
+                if not sock:
+                    raise ConnectionError(
+                        f"Failed to connect to {self.host}:{self.port} on any resolved address ({len(sorted_ais)} candidates attempted). "
+                        f"Last error: {connect_err}"
+                    )
+
+                # Request SSL (TLS)
+                sock.sendall(struct.pack('!II', 8, 80877103))
+                ssl_resp = sock.recv(1)
+                if ssl_resp != b'S':
+                    sock.close()
+                    raise ConnectionError(f"PostgreSQL server rejected SSL request (code {ssl_resp})")
+
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                ssl_sock = ctx.wrap_socket(sock, server_hostname=self.host)
+
+                # Startup Message
+                params = b'user\x00' + self.user.encode('utf-8') + b'\x00database\x00' + self.dbname.encode('utf-8') + b'\x00\x00'
+                ssl_sock.sendall(struct.pack('!II', 8 + len(params), 196608) + params)
+
+                msg_type = self._recv_exact(ssl_sock, 1)
+                l = struct.unpack('!I', self._recv_exact(ssl_sock, 4))[0]
+                payload = self._recv_exact(ssl_sock, l - 4)
+
+                if msg_type == b'E':
+                    err_text = payload.decode('utf-8', errors='ignore')
+                    ssl_sock.close()
+                    raise ConnectionError(f"PostgreSQL startup error: {err_text}")
+
+                # SCRAM-SHA-256 Authentication
+                c_nonce = base64.b64encode(os.urandom(18)).decode('ascii')
+                client_first_bare = f'n={self.user},r={c_nonce}'
+                client_first = f'n,,{client_first_bare}'
+                sasl_initial = b'SCRAM-SHA-256\x00' + struct.pack('!I', len(client_first)) + client_first.encode('ascii')
+                ssl_sock.sendall(b'p' + struct.pack('!I', 4 + len(sasl_initial)) + sasl_initial)
+
+                r_type = self._recv_exact(ssl_sock, 1)
+                r_len = struct.unpack('!I', self._recv_exact(ssl_sock, 4))[0]
+                server_first_data = self._recv_exact(ssl_sock, r_len - 4)
+                if r_type == b'E':
+                    ssl_sock.close()
+                    raise ConnectionError(f"SASL initiation error: {server_first_data.decode('utf-8', errors='ignore')}")
+
+                # Skip 4 bytes authentication type code
+                server_first = server_first_data[4:].decode('ascii')
+                sf_dict = dict(item.split('=', 1) for item in server_first.split(','))
+                s_nonce = sf_dict['r']
+                salt = base64.b64decode(sf_dict['s'])
+                iterations = int(sf_dict['i'])
+
+                def h(b): return hashlib.sha256(b).digest()
+                def hmac_sha256(key, msg): return hmac.new(key, msg, hashlib.sha256).digest()
+                def xor(b1, b2): return bytes(x ^ y for x, y in zip(b1, b2))
+
+                salted_password = hashlib.pbkdf2_hmac('sha256', self.pwd.encode('utf-8'), salt, iterations, dklen=32)
+                client_key = hmac_sha256(salted_password, b'Client Key')
+                stored_key = h(client_key)
+                client_final_without_proof = f'c=biws,r={s_nonce}'
+                auth_message = f'{client_first_bare},{server_first},{client_final_without_proof}'.encode('ascii')
+                client_signature = hmac_sha256(stored_key, auth_message)
+                client_proof = xor(client_key, client_signature)
+                client_final = f'{client_final_without_proof},p={base64.b64encode(client_proof).decode("ascii")}'
+
+                ssl_sock.sendall(b'p' + struct.pack('!I', 4 + len(client_final)) + client_final.encode('ascii'))
+
+                f_type = self._recv_exact(ssl_sock, 1)
+                f_len = struct.unpack('!I', self._recv_exact(ssl_sock, 4))[0]
+                f_data = self._recv_exact(ssl_sock, f_len - 4)
+                if f_type == b'E':
+                    ssl_sock.close()
+                    raise ConnectionError(f"SCRAM proof verification error: {f_data.decode('utf-8', errors='ignore')}")
+
+                ok_type = self._recv_exact(ssl_sock, 1)
+                ok_len = struct.unpack('!I', self._recv_exact(ssl_sock, 4))[0]
+                self._recv_exact(ssl_sock, ok_len - 4)
+
+                while True:
+                    t = self._recv_exact(ssl_sock, 1)
+                    pl = struct.unpack('!I', self._recv_exact(ssl_sock, 4))[0]
+                    self._recv_exact(ssl_sock, pl - 4)
+                    if t == b'Z':
+                        break
+                return ssl_sock
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    time.sleep(attempt * 0.75)
+                else:
+                    raise last_error
 
     def execute(self, sql):
         with self._lock:
