@@ -71,4 +71,19 @@ object ApiConfig {
      */
     val connectTimeoutMs: Long = 15_000L
     val readTimeoutMs: Long = 30_000L
+
+    /**
+     * Production Cryptographic Secrets and Database Configuration injected via Secrets Gradle Plugin at build/runtime.
+     */
+    val databaseUrl: String
+        get() = BuildConfig.DATABASE_URL
+
+    val sessionSecret: String
+        get() = BuildConfig.SESSION_SECRET
+
+    val tokenSigningSecret: String
+        get() = BuildConfig.TOKEN_SIGNING_SECRET
+
+    val encryptionKey: String
+        get() = BuildConfig.ENCRYPTION_KEY
 }

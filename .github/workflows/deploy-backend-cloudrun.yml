@@ -1,0 +1,52 @@
+name: Deploy MAHAKAL Backend to Google Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Google Cloud Region'
+        required: true
+        default: 'asia-south1'
+
+jobs:
+  deploy-cloud-run:
+    name: Build & Deploy to Google Cloud Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+
+      - name: Build & Push Container Image
+        run: |
+          IMAGE_NAME="${{ inputs.region }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mahakal-repo/mahakal-backend:${{ github.sha }}"
+          docker build -t "$IMAGE_NAME" -f backend/Dockerfile .
+          docker push "$IMAGE_NAME"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy mahakal-backend \
+            --image="$IMAGE_NAME" \
+            --region="${{ inputs.region }}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080 \
+            --memory=512Mi \
+            --cpu=1 \
+            --concurrency=80 \
+            --timeout=60s \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,SESSION_SECRET=SESSION_SECRET:latest,TOKEN_SIGNING_SECRET=TOKEN_SIGNING_SECRET:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest"

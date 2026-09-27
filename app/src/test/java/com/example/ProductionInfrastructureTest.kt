@@ -97,6 +97,21 @@ class ProductionInfrastructureTest {
     }
 
     @Test
+    fun testProductionSecretsConfigurationReadable() {
+        assertNotNull(ApiConfig.databaseUrl)
+        assertTrue(ApiConfig.databaseUrl.isNotEmpty())
+
+        assertNotNull(ApiConfig.sessionSecret)
+        assertTrue(ApiConfig.sessionSecret.isNotEmpty())
+
+        assertNotNull(ApiConfig.tokenSigningSecret)
+        assertTrue(ApiConfig.tokenSigningSecret.isNotEmpty())
+
+        assertNotNull(ApiConfig.encryptionKey)
+        assertTrue(ApiConfig.encryptionKey.isNotEmpty())
+    }
+
+    @Test
     fun testOutboxWorkerBatchProcessingAndStatus() = runBlocking {
         val outboxDao = database.outboxDao()
         val now = System.currentTimeMillis()

@@ -1,0 +1,22 @@
+# Secrets & Environment (NEVER package in container)
+.env
+.env.*
+!.env.example
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+env/
+
+# Git & IDE
+.git
+.gitignore
+.idea
+.vscode

@@ -1,0 +1,40 @@
+steps:
+  # 1. Build container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:$COMMIT_SHA', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:latest', '-f', 'backend/Dockerfile', '.']
+
+  # 2. Push image to Google Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:$COMMIT_SHA']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:latest']
+
+  # 3. Deploy image to Google Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mahakal-backend'
+      - '--image=$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:$COMMIT_SHA'
+      - '--region=$_REGION'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=10'
+      - '--concurrency=80'
+      - '--timeout=60s'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,SESSION_SECRET=SESSION_SECRET:latest,TOKEN_SIGNING_SECRET=TOKEN_SIGNING_SECRET:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest'
+
+images:
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:$COMMIT_SHA'
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/mahakal-repo/mahakal-backend:latest'
+
+substitutions:
+  _REGION: 'asia-south1'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

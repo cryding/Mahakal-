@@ -1,0 +1,34 @@
+# VCS & IDE
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Android & Gradle
+.gradle/
+build/
+app/build/
+gradle/
+gradlew*
+*.keystore
+*.jks
+*.aab
+*.apk
+
+# Environment & Secrets (NEVER package in container)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+env/
