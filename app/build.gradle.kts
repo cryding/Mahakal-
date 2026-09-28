@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -27,16 +28,31 @@ android {
     create("release") {
       val keystoreEnv = System.getenv("KEYSTORE_PATH")
       val fallbackFile = file("${rootDir}/my-upload-key.jks")
+      val signingPropsFile = file("${rootDir}/.signing.properties")
+      val signingProps = Properties()
+      if (signingPropsFile.exists()) {
+        signingPropsFile.inputStream().use { stream ->
+          signingProps.load(stream)
+        }
+      }
+
+      val resolvedStorePassword = System.getenv("STORE_PASSWORD")
+        ?: signingProps.getProperty("STORE_PASSWORD")
+      val resolvedKeyPassword = System.getenv("KEY_PASSWORD")
+        ?: signingProps.getProperty("KEY_PASSWORD")
+      val resolvedKeyAlias = System.getenv("KEY_ALIAS")
+        ?: signingProps.getProperty("KEY_ALIAS") ?: "upload"
+
       if (!keystoreEnv.isNullOrBlank() && file(keystoreEnv).exists()) {
         storeFile = file(keystoreEnv)
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
+        storePassword = resolvedStorePassword
+        keyAlias = resolvedKeyAlias
+        keyPassword = resolvedKeyPassword
       } else if (fallbackFile.exists()) {
         storeFile = fallbackFile
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
+        storePassword = resolvedStorePassword
+        keyAlias = resolvedKeyAlias
+        keyPassword = resolvedKeyPassword
       }
     }
     create("debugConfig") {
@@ -52,12 +68,16 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      buildConfigField("String", "API_BASE_URL", "\"https://mahakal-qo14.onrender.com\"")
       val releaseSigning = signingConfigs.getByName("release")
-      if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+      if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists() && !releaseSigning.storePassword.isNullOrBlank()) {
         signingConfig = releaseSigning
       }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      buildConfigField("String", "API_BASE_URL", "\"https://dev-api.mahakal.internal/v1\"")
+      signingConfig = signingConfigs.getByName("debugConfig")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -80,6 +100,14 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  // Server-side database and backend secrets MUST NEVER be packaged in the Android APK
+  ignoreList.add("DATABASE_URL")
+  ignoreList.add("SESSION_SECRET")
+  ignoreList.add("TOKEN_SIGNING_SECRET")
+  ignoreList.add("ENCRYPTION_KEY")
+  ignoreList.add("PUSH_CREDENTIALS_JSON_PATH")
+  // API_BASE_URL is managed cleanly by build variants (debug vs release)
+  ignoreList.add("API_BASE_URL")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

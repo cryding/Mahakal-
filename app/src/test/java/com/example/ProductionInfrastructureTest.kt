@@ -97,18 +97,17 @@ class ProductionInfrastructureTest {
     }
 
     @Test
-    fun testProductionSecretsConfigurationReadable() {
-        assertNotNull(ApiConfig.databaseUrl)
-        assertTrue(ApiConfig.databaseUrl.isNotEmpty())
+    fun testSecretsNeverExposedInClient() {
+        // Strict security assertion: Client codebase must never expose private backend credentials
+        val apiConfigFields = ApiConfig::class.java.declaredFields.map { it.name }
+        assertTrue("DATABASE_URL must not be exposed in ApiConfig", !apiConfigFields.contains("databaseUrl"))
+        assertTrue("SESSION_SECRET must not be exposed in ApiConfig", !apiConfigFields.contains("sessionSecret"))
+        assertTrue("TOKEN_SIGNING_SECRET must not be exposed in ApiConfig", !apiConfigFields.contains("tokenSigningSecret"))
+        assertTrue("ENCRYPTION_KEY must not be exposed in ApiConfig", !apiConfigFields.contains("encryptionKey"))
 
-        assertNotNull(ApiConfig.sessionSecret)
-        assertTrue(ApiConfig.sessionSecret.isNotEmpty())
-
-        assertNotNull(ApiConfig.tokenSigningSecret)
-        assertTrue(ApiConfig.tokenSigningSecret.isNotEmpty())
-
-        assertNotNull(ApiConfig.encryptionKey)
-        assertTrue(ApiConfig.encryptionKey.isNotEmpty())
+        val baseUrl = ApiConfig.getBaseUrl()
+        assertTrue("Base URL must be HTTPS", baseUrl.startsWith("https://"))
+        assertTrue("Base URL must not use insecure localhost or loopback", !baseUrl.contains("localhost") && !baseUrl.contains("127.0.0.1") && !baseUrl.contains("10.0.2.2"))
     }
 
     @Test

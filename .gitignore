@@ -19,6 +19,7 @@ debug.keystore
 debug.keystore.base64
 *.jks
 *.keystore
+.signing.properties
 release-artifacts/
 app/build/
 .build-outputs/

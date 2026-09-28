@@ -25,6 +25,10 @@ enum class AppEnvironment(val envName: String) {
  */
 object ApiConfig {
 
+    const val PRODUCTION_API_URL = "https://mahakal-qo14.onrender.com"
+    const val STAGING_API_URL = "https://staging-api.mahakal.internal/v1"
+    const val DEVELOPMENT_API_URL = "https://dev-api.mahakal.internal/v1"
+
     /**
      * Active environment resolved from build flavor / BuildConfig or default.
      */
@@ -39,12 +43,32 @@ object ApiConfig {
 
     /**
      * Resolves the authoritative base API URL for the current runtime environment.
+     * Enforces HTTPS strictly and rejects insecure or local addresses in production.
      */
     fun getBaseUrl(): String {
+        val configuredUrl = try {
+            val field = BuildConfig::class.java.getField("API_BASE_URL")
+            field.get(null) as? String
+        } catch (_: Throwable) {
+            null
+        }
+
+        if (!configuredUrl.isNullOrBlank()) {
+            val trimmed = configuredUrl.trim().trimEnd('/')
+            // Security verification: must use HTTPS and must not be a local/insecure address
+            if (trimmed.startsWith("https://", ignoreCase = true) &&
+                !trimmed.contains("localhost", ignoreCase = true) &&
+                !trimmed.contains("127.0.0.1") &&
+                !trimmed.contains("10.0.2.2")
+            ) {
+                return trimmed
+            }
+        }
+
         return when (currentEnvironment) {
-            AppEnvironment.DEVELOPMENT -> "https://dev-api.mahakal.internal/v1"
-            AppEnvironment.STAGING -> "https://staging-api.mahakal.internal/v1"
-            AppEnvironment.PRODUCTION -> "https://api.mahakal.internal/v1"
+            AppEnvironment.DEVELOPMENT -> DEVELOPMENT_API_URL
+            AppEnvironment.STAGING -> STAGING_API_URL
+            AppEnvironment.PRODUCTION -> PRODUCTION_API_URL
         }
     }
 
@@ -71,19 +95,4 @@ object ApiConfig {
      */
     val connectTimeoutMs: Long = 15_000L
     val readTimeoutMs: Long = 30_000L
-
-    /**
-     * Production Cryptographic Secrets and Database Configuration injected via Secrets Gradle Plugin at build/runtime.
-     */
-    val databaseUrl: String
-        get() = BuildConfig.DATABASE_URL
-
-    val sessionSecret: String
-        get() = BuildConfig.SESSION_SECRET
-
-    val tokenSigningSecret: String
-        get() = BuildConfig.TOKEN_SIGNING_SECRET
-
-    val encryptionKey: String
-        get() = BuildConfig.ENCRYPTION_KEY
 }
