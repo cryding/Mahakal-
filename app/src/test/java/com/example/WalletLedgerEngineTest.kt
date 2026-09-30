@@ -30,7 +30,7 @@ import org.robolectric.annotation.Config
 import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class WalletLedgerEngineTest {
 
     private lateinit var database: MahakalServerDatabase
