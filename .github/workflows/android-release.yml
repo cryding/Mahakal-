@@ -14,21 +14,22 @@ on:
         description: 'Publish GitHub Release asset'
         required: true
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: android-release-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  release:
-    name: Build & Package Production Android Release
+  build_and_verify:
+    name: Build & Verify Production Android Release
     runs-on: ubuntu-latest
     timeout-minutes: 35
-
     permissions:
-      contents: write
-
+      contents: read
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -45,71 +46,265 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Prepare Secrets & Keystore
+      - name: Enforce Production Secrets Validation
         env:
           KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
         run: |
-          cp .env.example .env
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Production keystore secret detected. Decoding to secure temporary path..."
-            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
-            echo "KEYSTORE_PATH=/tmp/release.keystore" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
-          else
-            echo "WARNING: Production keystore secret not found in GitHub Secrets."
-            echo "Building with development signing config or unsigned bundle."
+          echo "Auditing production signing secrets..."
+          MISSING=0
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing required secret: PROD_RELEASE_KEYSTORE_BASE64"
+            MISSING=1
           fi
+          if [ -z "$STORE_PASSWORD" ]; then
+            echo "::error::Missing required secret: PROD_STORE_PASSWORD"
+            MISSING=1
+          fi
+          if [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Missing required secret: PROD_KEY_PASSWORD"
+            MISSING=1
+          fi
+          if [ "$MISSING" -ne 0 ]; then
+            echo "FATAL: Release workflow aborted. Missing required production signing secrets."
+            exit 1
+          fi
+          echo "All required production signing secrets are present."
 
-      - name: Run Quality & Security Checks
+      - name: Prepare & Verify Temporary Production Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
         run: |
-          echo "Scanning for accidental committed private keys..."
+          KEYSTORE_FILE="/tmp/release_$(date +%s).jks"
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
+          
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          chmod 600 "$KEYSTORE_FILE"
+          
+          # Verify format is PKCS12 and alias is upload
+          KEYTOOL_OUT=$(keytool -list -v -keystore "$KEYSTORE_FILE" -storepass "$STORE_PASSWORD")
+          
+          if ! echo "$KEYTOOL_OUT" | grep -qi "PKCS12"; then
+            echo "::error::Keystore is not in PKCS12 format"
+            rm -f "$KEYSTORE_FILE"
+            exit 1
+          fi
+          
+          if ! echo "$KEYTOOL_OUT" | grep -qi "Alias name: upload"; then
+            echo "::error::Keystore does not contain required alias 'upload'"
+            rm -f "$KEYSTORE_FILE"
+            exit 1
+          fi
+          
+          # Verify SHA-256 fingerprint exactly matches canonical fingerprint
+          CANONICAL_FINGERPRINT="52:E9:B3:41:EC:66:62:A4:60:5B:0A:DE:2F:E8:51:54:64:D6:12:A3:52:F4:CB:38:B3:F3:9C:AF:AD:97:BD:3A"
+          ACTUAL_SHA256=$(echo "$KEYTOOL_OUT" | grep -i "SHA256:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
+          
+          echo "Actual Keystore SHA256: $ACTUAL_SHA256"
+          echo "Expected Keystore SHA256: $CANONICAL_FINGERPRINT"
+          
+          if [ "$ACTUAL_SHA256" != "$CANONICAL_FINGERPRINT" ]; then
+            echo "::error::Keystore certificate SHA-256 does not match canonical production fingerprint!"
+            rm -f "$KEYSTORE_FILE"
+            exit 1
+          fi
+          echo "Keystore verification passed: PKCS12, alias=upload, canonical fingerprint verified."
+
+      - name: Verify Build Configuration & Production Endpoints
+        run: |
+          echo "Auditing application identity..."
+          APP_ID=$(grep 'applicationId' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*//')
+          VER_NAME=$(grep 'versionName' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*//')
+          VER_CODE=$(grep 'versionCode' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*//')
+          
+          echo "Application ID: $APP_ID"
+          echo "Version Name: $VER_NAME"
+          echo "Version Code: $VER_CODE"
+          
+          if [ "$APP_ID" != "com.aistudio.mahakal.ledger" ]; then
+            echo "::error::Application ID mismatch: $APP_ID"
+            exit 1
+          fi
+          if [ "$VER_NAME" != "1.0" ]; then
+            echo "::error::Version name mismatch: $VER_NAME"
+            exit 1
+          fi
+          if [ "$VER_CODE" != "1" ]; then
+            echo "::error::Version code mismatch: $VER_CODE"
+            exit 1
+          fi
+          
+          # Enforce production API configuration in buildConfigField
+          sed -i 's|"https://dev-api.mahakal.internal/v1"|"https://mahakal-qo14.onrender.com"|g' app/build.gradle.kts
+          sed -i 's|"development"|"production"|g' app/build.gradle.kts
+          
+          # Verify production API URL is present
+          if ! grep -q "https://mahakal-qo14.onrender.com" app/build.gradle.kts && ! grep -q "https://mahakal-qo14.onrender.com" app/src/main/java/com/example/core/network/ApiConfig.kt; then
+            echo "::error::Production API URL https://mahakal-qo14.onrender.com not found in release configuration"
+            exit 1
+          fi
+          
+          # Scan to verify rejecting dev-api.mahakal.internal in build configuration
+          echo "Scanning for prohibited development endpoints in build configuration..."
+          if grep -rn "dev-api.mahakal.internal" app/build.gradle.kts; then
+            echo "::error::Found dev-api.mahakal.internal in build.gradle.kts"
+            exit 1
+          fi
+          echo "Build configuration verified."
+
+      - name: Run Source Security Checks & Tests
+        run: |
+          echo "Scanning for accidental committed private keys or credentials..."
           ! grep -rE "BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY" app/src/ || exit 1
-          echo "Source security scan passed."
-
-      - name: Run Unit Tests
-        run: |
           gradle :app:testDebugUnitTest --no-daemon
 
-      - name: Build Android Release APK & AAB
+      - name: Build Android Production Release APK & AAB
+        env:
+          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
         run: |
-          # Build release bundle and release APK
-          gradle :app:bundleRelease :app:assembleRelease --no-daemon
+          gradle :app:bundleRelease :app:assembleRelease --no-daemon             -Pandroid.injected.signing.store.file="$KEYSTORE_PATH"             -Pandroid.injected.signing.store.password="$STORE_PASSWORD"             -Pandroid.injected.signing.key.alias="upload"             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
-      - name: Stage Artifacts & Generate Checksums
+      - name: Stage Artifacts
         run: |
           mkdir -p release-artifacts
-          
-          # Locate built APK and AAB
           APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n 1)
           
           if [ -z "$APK_SRC" ]; then
-            echo "APK not found in release directory, checking all build outputs..."
-            APK_SRC=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+            echo "::error::Release APK was not generated"
+            exit 1
+          fi
+          if [ -z "$AAB_SRC" ]; then
+            echo "::error::Release AAB was not generated"
+            exit 1
           fi
           
           cp "$APK_SRC" release-artifacts/MAHAKAL-release.apk
-          if [ -n "$AAB_SRC" ]; then
-            cp "$AAB_SRC" release-artifacts/MAHAKAL-release.aab
+          cp "$AAB_SRC" release-artifacts/MAHAKAL-release.aab
+
+      - name: Verify APK Signature with apksigner
+        run: |
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          echo "Using apksigner: $APKSIGNER"
+          
+          VERIFY_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs release-artifacts/MAHAKAL-release.apk)
+          echo "$VERIFY_OUTPUT"
+          
+          # Check for debug certificate - must FAIL if debug
+          if echo "$VERIFY_OUTPUT" | grep -qi "CN=Android Debug"; then
+            echo "::error::APK was signed with Debug certificate! Hard failure."
+            exit 1
           fi
           
+          # Verify SHA-256 certificate fingerprint matches canonical fingerprint
+          CANONICAL_FINGERPRINT="52:E9:B3:41:EC:66:62:A4:60:5B:0A:DE:2F:E8:51:54:64:D6:12:A3:52:F4:CB:38:B3:F3:9C:AF:AD:97:BD:3A"
+          APK_SHA256=$(echo "$VERIFY_OUTPUT" | grep -i "SHA-256 digest:" | head -n 1 | awk '{print $NF}')
+          
+          CLEAN_CANONICAL=$(echo "$CANONICAL_FINGERPRINT" | tr -d ':' | tr 'A-Z' 'a-z')
+          CLEAN_ACTUAL=$(echo "$APK_SHA256" | tr -d ':' | tr 'A-Z' 'a-z')
+          
+          echo "APK Certificate SHA-256: $CLEAN_ACTUAL"
+          echo "Canonical SHA-256:       $CLEAN_CANONICAL"
+          
+          if [ "$CLEAN_ACTUAL" != "$CLEAN_CANONICAL" ]; then
+            echo "::error::APK signature certificate does not match the canonical production fingerprint!"
+            exit 1
+          fi
+          echo "APK signature successfully verified with canonical production certificate."
+
+      - name: Verify AAB Signature
+        run: |
+          echo "Verifying AAB signing information..."
+          AAB_FILE="release-artifacts/MAHAKAL-release.aab"
+          
+          jarsigner -verify -verbose -certs "$AAB_FILE" | head -n 20
+          CERT_DUMP=$(keytool -printcert -jarfile "$AAB_FILE")
+          echo "$CERT_DUMP"
+          
+          if echo "$CERT_DUMP" | grep -qi "CN=Android Debug"; then
+            echo "::error::AAB was signed with Debug certificate!"
+            exit 1
+          fi
+          
+          CANONICAL_FINGERPRINT="52:E9:B3:41:EC:66:62:A4:60:5B:0A:DE:2F:E8:51:54:64:D6:12:A3:52:F4:CB:38:B3:F3:9C:AF:AD:97:BD:3A"
+          AAB_SHA256=$(echo "$CERT_DUMP" | grep -i "SHA256:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
+          
+          if [ "$AAB_SHA256" != "$CANONICAL_FINGERPRINT" ]; then
+            echo "::error::AAB signature does not match canonical production fingerprint!"
+            exit 1
+          fi
+          echo "AAB signature verified with canonical production certificate."
+
+      - name: Run Artifact Secret & Endpoint Scan
+        run: |
+          echo "Scanning APK and AAB for leaked secrets and disallowed endpoints..."
+          
+          APK_LIST=$(unzip -l release-artifacts/MAHAKAL-release.apk)
+          AAB_LIST=$(unzip -l release-artifacts/MAHAKAL-release.aab)
+          
+          for PATTERN in ".jks" ".keystore" ".signing.properties" "secrets_transfer" "password"; do
+            if echo "$APK_LIST" | grep -qi "$PATTERN"; then
+              echo "::error::Prohibited secret artifact found in APK: $PATTERN"
+              exit 1
+            fi
+            if echo "$AAB_LIST" | grep -qi "$PATTERN"; then
+              echo "::error::Prohibited secret artifact found in AAB: $PATTERN"
+              exit 1
+            fi
+          done
+          
+          unzip -q -o release-artifacts/MAHAKAL-release.apk -d /tmp/apk_unpacked
+          for ENDPOINT in "127.0.0.1" "10.0.2.2" "10.0.3.2" "dev-api.mahakal.internal"; do
+            if grep -rq "$ENDPOINT" /tmp/apk_unpacked/classes*.dex; then
+              echo "::error::Prohibited development endpoint found in release DEX: $ENDPOINT"
+              rm -rf /tmp/apk_unpacked
+              exit 1
+            fi
+          done
+          rm -rf /tmp/apk_unpacked
+          echo "Artifact secret and endpoint scans passed."
+
+      - name: Generate Checksums
+        run: |
           cd release-artifacts
-          sha256sum * > SHA256SUMS.txt
+          sha256sum MAHAKAL-release.apk MAHAKAL-release.aab > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cd ..
 
-      - name: Upload GitHub Actions Artifacts
+      - name: Upload Verified Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mahakal-release-binaries
+          name: mahakal-production-release
           path: release-artifacts/*
           retention-days: 30
 
-      - name: Create or Update GitHub Release
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true' }}
+      - name: Clean Temporary Production Keystore
+        if: always()
+        run: |
+          if [ -n "$KEYSTORE_PATH" ] && [ -f "$KEYSTORE_PATH" ]; then
+            echo "Securely cleaning up temporary decoded keystore..."
+            shred -u "$KEYSTORE_PATH" 2>/dev/null || rm -f "$KEYSTORE_PATH"
+          fi
+          echo "Temporary keystore cleanup completed."
+
+  publish_release:
+    name: Publish Production GitHub Release
+    needs: build_and_verify
+    if: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == true || github.event.inputs.publish_release == 'true') && !contains(github.event.head_commit.message, '[skip release]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Verified Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mahakal-production-release
+          path: release-artifacts
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
