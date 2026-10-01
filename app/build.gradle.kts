@@ -37,6 +37,39 @@ android {
         buildConfigField("String", "STRUCTURED_JSON_LOGGING", "\"true\"")
     }
 
+    val releaseKeystoreProvider = providers.gradleProperty("mahakal.release.keystore")
+        .orElse(providers.gradleProperty("mahakal_release_keystore"))
+        .orElse(providers.environmentVariable("MAHAKAL_RELEASE_KEYSTORE"))
+        .orElse(providers.environmentVariable("ORG_GRADLE_PROJECT_mahakal_release_keystore"))
+
+    val releaseStorePasswordProvider = providers.gradleProperty("mahakal.release.storePassword")
+        .orElse(providers.gradleProperty("mahakal_release_storePassword"))
+        .orElse(providers.environmentVariable("MAHAKAL_RELEASE_STORE_PASSWORD"))
+        .orElse(providers.environmentVariable("ORG_GRADLE_PROJECT_mahakal_release_storePassword"))
+
+    val releaseKeyAliasProvider = providers.gradleProperty("mahakal.release.keyAlias")
+        .orElse(providers.gradleProperty("mahakal_release_keyAlias"))
+        .orElse(providers.environmentVariable("MAHAKAL_RELEASE_KEY_ALIAS"))
+        .orElse(providers.environmentVariable("ORG_GRADLE_PROJECT_mahakal_release_keyAlias"))
+
+    val releaseKeyPasswordProvider = providers.gradleProperty("mahakal.release.keyPassword")
+        .orElse(providers.gradleProperty("mahakal_release_keyPassword"))
+        .orElse(providers.environmentVariable("MAHAKAL_RELEASE_KEY_PASSWORD"))
+        .orElse(providers.environmentVariable("ORG_GRADLE_PROJECT_mahakal_release_keyPassword"))
+
+    signingConfigs {
+        create("release") {
+            val ksPath = releaseKeystoreProvider.orNull
+            if (!ksPath.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = releaseStorePasswordProvider.orNull
+                keyAlias = releaseKeyAliasProvider.orNull ?: "upload"
+                keyPassword = releaseKeyPasswordProvider.orNull
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -44,6 +77,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isMinifyEnabled = false
@@ -60,6 +94,27 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "validateSigningRelease" || name == "packageRelease" || name == "signReleaseBundle") {
+        doFirst {
+            val releaseConfig = android.signingConfigs.getByName("release")
+            val ksFile = releaseConfig.storeFile
+            if (ksFile == null || !ksFile.exists()) {
+                throw GradleException(
+                    "Production release build failed: Keystore file is missing or not configured. " +
+                    "Expected properties: mahakal.release.keystore, mahakal.release.storePassword, mahakal.release.keyAlias, mahakal.release.keyPassword."
+                )
+            }
+            if (releaseConfig.storePassword.isNullOrBlank() || releaseConfig.keyPassword.isNullOrBlank()) {
+                throw GradleException(
+                    "Production release build failed: Keystore or Key password is empty. " +
+                    "Set mahakal.release.storePassword and mahakal.release.keyPassword."
+                )
+            }
         }
     }
 }

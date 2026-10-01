@@ -95,14 +95,14 @@ jobs:
           retention-days: 14
 
   # ============================================================================
-  # Stage 3: Release Build & Artifact Packaging
+  # Stage 3: Validate Release Compilation
   # ============================================================================
-  build-release:
-    name: Build Release Artifacts (AAB / APK)
+  validate-release-build:
+    name: Validate Release Compilation
     needs: test
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Codebase
@@ -115,30 +115,9 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Prepare Environment Secrets
-        env:
-          KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
-          APP_ENV: production
-        run: |
-          cp .env.example .env
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
-            echo "KEYSTORE_PATH=/tmp/release.keystore" >> .env
-            echo "STORE_PASSWORD=$STORE_PASSWORD" >> .env
-            echo "KEY_PASSWORD=$KEY_PASSWORD" >> .env
-          fi
+      - name: Prepare Local Environment
+        run: cp .env.example .env
 
-      - name: Build Production Release Bundle & APK
+      - name: Validate Release Compilation & Lint
         run: |
-          gradle :app:assembleRelease --no-daemon
-
-      - name: Archive Production Release Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mahakal-production-release
-          path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
-          retention-days: 30
+          gradle :app:compileReleaseKotlin :app:lintVitalRelease --no-daemon

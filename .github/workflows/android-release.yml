@@ -162,23 +162,29 @@ jobs:
 
       - name: Build Android Production Release APK & AAB
         env:
-          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_mahakal_release_keystore: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_mahakal_release_storePassword: ${{ secrets.PROD_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_mahakal_release_keyAlias: upload
+          ORG_GRADLE_PROJECT_mahakal_release_keyPassword: ${{ secrets.PROD_KEY_PASSWORD }}
+          MAHAKAL_RELEASE_KEYSTORE: ${{ env.KEYSTORE_PATH }}
+          MAHAKAL_RELEASE_STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+          MAHAKAL_RELEASE_KEY_ALIAS: upload
+          MAHAKAL_RELEASE_KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
         run: |
-          gradle :app:bundleRelease :app:assembleRelease --no-daemon             -Pandroid.injected.signing.store.file="$KEYSTORE_PATH"             -Pandroid.injected.signing.store.password="$STORE_PASSWORD"             -Pandroid.injected.signing.key.alias="upload"             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          gradle :app:assembleRelease :app:bundleRelease --no-daemon
 
       - name: Stage Artifacts
         run: |
           mkdir -p release-artifacts
-          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n 1)
+          APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" | head -n 1)
+          AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" ! -name "*unsigned*" | head -n 1)
           
           if [ -z "$APK_SRC" ]; then
-            echo "::error::Release APK was not generated"
+            echo "::error::Signed Release APK was not generated"
             exit 1
           fi
           if [ -z "$AAB_SRC" ]; then
-            echo "::error::Release AAB was not generated"
+            echo "::error::Signed Release AAB was not generated"
             exit 1
           fi
           
@@ -199,17 +205,23 @@ jobs:
             exit 1
           fi
           
+          # Fail if APK is unsigned
+          if ! echo "$VERIFY_OUTPUT" | grep -qi "Verifies"; then
+            echo "::error::APK verification failed - APK is unsigned or invalid!"
+            exit 1
+          fi
+          
           # Verify SHA-256 certificate fingerprint matches canonical fingerprint
           CANONICAL_FINGERPRINT="52:E9:B3:41:EC:66:62:A4:60:5B:0A:DE:2F:E8:51:54:64:D6:12:A3:52:F4:CB:38:B3:F3:9C:AF:AD:97:BD:3A"
           APK_SHA256=$(echo "$VERIFY_OUTPUT" | grep -i "SHA-256 digest:" | head -n 1 | awk '{print $NF}')
           
-          CLEAN_CANONICAL=$(echo "$CANONICAL_FINGERPRINT" | tr -d ':' | tr 'A-Z' 'a-z')
-          CLEAN_ACTUAL=$(echo "$APK_SHA256" | tr -d ':' | tr 'A-Z' 'a-z')
+          CLEAN_CANONICAL=$(echo "$CANONICAL_FINGERPRINT" | tr -d ': ' | tr 'A-Z' 'a-z')
+          CLEAN_ACTUAL=$(echo "$APK_SHA256" | tr -d ': ' | tr 'A-Z' 'a-z')
           
           echo "APK Certificate SHA-256: $CLEAN_ACTUAL"
           echo "Canonical SHA-256:       $CLEAN_CANONICAL"
           
-          if [ "$CLEAN_ACTUAL" != "$CLEAN_CANONICAL" ]; then
+          if [ -z "$CLEAN_ACTUAL" ] || [ "$CLEAN_ACTUAL" != "$CLEAN_CANONICAL" ]; then
             echo "::error::APK signature certificate does not match the canonical production fingerprint!"
             exit 1
           fi
@@ -220,7 +232,12 @@ jobs:
           echo "Verifying AAB signing information..."
           AAB_FILE="release-artifacts/MAHAKAL-release.aab"
           
-          jarsigner -verify -verbose -certs "$AAB_FILE" | head -n 20
+          JARSIGNER_OUT=$(jarsigner -verify -verbose -certs "$AAB_FILE" 2>&1)
+          if ! echo "$JARSIGNER_OUT" | grep -qi "jar verified"; then
+            echo "::error::AAB signature verification failed - AAB is unsigned or invalid!"
+            exit 1
+          fi
+          
           CERT_DUMP=$(keytool -printcert -jarfile "$AAB_FILE")
           echo "$CERT_DUMP"
           
@@ -230,9 +247,13 @@ jobs:
           fi
           
           CANONICAL_FINGERPRINT="52:E9:B3:41:EC:66:62:A4:60:5B:0A:DE:2F:E8:51:54:64:D6:12:A3:52:F4:CB:38:B3:F3:9C:AF:AD:97:BD:3A"
-          AAB_SHA256=$(echo "$CERT_DUMP" | grep -i "SHA256:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
+          CLEAN_CANONICAL=$(echo "$CANONICAL_FINGERPRINT" | tr -d ': ' | tr 'a-z' 'A-Z')
+          AAB_SHA256=$(echo "$CERT_DUMP" | grep -i "SHA256:" | head -n 1 | awk '{print $NF}' | tr -d ': ' | tr 'a-z' 'A-Z')
           
-          if [ "$AAB_SHA256" != "$CANONICAL_FINGERPRINT" ]; then
+          echo "AAB Certificate SHA-256: $AAB_SHA256"
+          echo "Canonical SHA-256:       $CLEAN_CANONICAL"
+          
+          if [ -z "$AAB_SHA256" ] || [ "$AAB_SHA256" != "$CLEAN_CANONICAL" ]; then
             echo "::error::AAB signature does not match canonical production fingerprint!"
             exit 1
           fi
@@ -257,7 +278,7 @@ jobs:
           done
           
           unzip -q -o release-artifacts/MAHAKAL-release.apk -d /tmp/apk_unpacked
-          for ENDPOINT in "127.0.0.1" "10.0.2.2" "10.0.3.2" "dev-api.mahakal.internal"; do
+          for ENDPOINT in "127.0.0.1" "10.0.2.2" "10.0.3.2" "localhost" "dev-api.mahakal.internal"; do
             if grep -rq "$ENDPOINT" /tmp/apk_unpacked/classes*.dex; then
               echo "::error::Prohibited development endpoint found in release DEX: $ENDPOINT"
               rm -rf /tmp/apk_unpacked
@@ -293,7 +314,7 @@ jobs:
   publish_release:
     name: Publish Production GitHub Release
     needs: build_and_verify
-    if: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == true || github.event.inputs.publish_release == 'true') && !contains(github.event.head_commit.message, '[skip release]') }}
+    if: ${{ (github.event.inputs.publish_release == true || github.event.inputs.publish_release == 'true') && !contains(github.event.head_commit.message, '[skip release]') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
