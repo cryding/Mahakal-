@@ -17,9 +17,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "API_BASE_URL", "\"https://dev-api.mahakal.internal/v1\"")
         buildConfigField("String", "API_PORT", "\"8080\"")
-        buildConfigField("String", "APP_ENV", "\"development\"")
         buildConfigField("String", "CORS_ALLOWED_ORIGINS", "\"https://admin.mahakal.internal,https://agent.mahakal.internal\"")
         buildConfigField("String", "ACCESS_TOKEN_EXPIRY_SECONDS", "\"3600\"")
         buildConfigField("String", "REFRESH_TOKEN_EXPIRY_SECONDS", "\"604800\"")
@@ -78,9 +76,13 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "API_BASE_URL", "\"https://mahakal-qo14.onrender.com\"")
+            buildConfigField("String", "APP_ENV", "\"production\"")
         }
         debug {
             isMinifyEnabled = false
+            buildConfigField("String", "API_BASE_URL", "\"https://dev-api.mahakal.internal/v1\"")
+            buildConfigField("String", "APP_ENV", "\"development\"")
         }
     }
     compileOptions {

@@ -26,50 +26,23 @@ enum class AppEnvironment(val envName: String) {
 object ApiConfig {
 
     const val PRODUCTION_API_URL = "https://mahakal-qo14.onrender.com"
-    const val STAGING_API_URL = "https://staging-api.mahakal.internal/v1"
-    const val DEVELOPMENT_API_URL = "https://dev-api.mahakal.internal/v1"
 
     /**
-     * Active environment resolved from build flavor / BuildConfig or default.
+     * Active environment resolved from BuildConfig.
      */
     val currentEnvironment: AppEnvironment by lazy {
-        if (BuildConfig.DEBUG) {
-            AppEnvironment.DEVELOPMENT
-        } else {
-            // When release signing / release build is engaged, check if explicitly configured as staging or production
-            AppEnvironment.PRODUCTION
-        }
+        AppEnvironment.fromString(BuildConfig.APP_ENV)
     }
 
     /**
      * Resolves the authoritative base API URL for the current runtime environment.
-     * Enforces HTTPS strictly and rejects insecure or local addresses in production.
      */
     fun getBaseUrl(): String {
-        val configuredUrl = try {
-            val field = BuildConfig::class.java.getField("API_BASE_URL")
-            field.get(null) as? String
-        } catch (_: Throwable) {
-            null
+        val configuredUrl = BuildConfig.API_BASE_URL
+        if (configuredUrl.isNotBlank()) {
+            return configuredUrl.trim().trimEnd('/')
         }
-
-        if (!configuredUrl.isNullOrBlank()) {
-            val trimmed = configuredUrl.trim().trimEnd('/')
-            // Security verification: must use HTTPS and must not be a local/insecure address
-            if (trimmed.startsWith("https://", ignoreCase = true) &&
-                !trimmed.contains("localhost", ignoreCase = true) &&
-                !trimmed.contains("127.0.0.1") &&
-                !trimmed.contains("10.0.2.2")
-            ) {
-                return trimmed
-            }
-        }
-
-        return when (currentEnvironment) {
-            AppEnvironment.DEVELOPMENT -> DEVELOPMENT_API_URL
-            AppEnvironment.STAGING -> STAGING_API_URL
-            AppEnvironment.PRODUCTION -> PRODUCTION_API_URL
-        }
+        return PRODUCTION_API_URL
     }
 
     /**

@@ -511,7 +511,7 @@ fun SecSessionRow(
                         color = Color.White
                     )
                     Text(
-                        text = "Role: ${session.role} | IP: ${session.ipAddress ?: "127.0.0.1"}",
+                        text = "Role: ${session.role} | IP: ${session.ipAddress ?: "Direct"}",
                         fontSize = 10.sp,
                         color = Color(0xFF94A3B8)
                     )

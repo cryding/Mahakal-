@@ -114,45 +114,24 @@ jobs:
 
       - name: Verify Build Configuration & Production Endpoints
         run: |
-          echo "Auditing application identity..."
-          APP_ID=$(grep 'applicationId' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*//')
-          VER_NAME=$(grep 'versionName' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*//')
-          VER_CODE=$(grep 'versionCode' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*//')
+          echo "Auditing application identity and build configuration..."
+          python3 -c "
+          with open('app/build.gradle.kts', 'r') as f:
+              gradle_content = f.read()
+          import re
+          app_id = re.search(r'applicationId\s*=\s*\"([^\"]+)\"', gradle_content)
+          ver_name = re.search(r'versionName\s*=\s*\"([^\"]+)\"', gradle_content)
+          ver_code = re.search(r'versionCode\s*=\s*([0-9]+)', gradle_content)
           
-          echo "Application ID: $APP_ID"
-          echo "Version Name: $VER_NAME"
-          echo "Version Code: $VER_CODE"
+          assert app_id and app_id.group(1) == 'com.aistudio.mahakal.ledger', f'Application ID mismatch: {app_id.group(1) if app_id else None}'
+          assert ver_name and ver_name.group(1) == '1.0', f'Version Name mismatch: {ver_name.group(1) if ver_name else None}'
+          assert ver_code and ver_code.group(1) == '1', f'Version Code mismatch: {ver_code.group(1) if ver_code else None}'
           
-          if [ "$APP_ID" != "com.aistudio.mahakal.ledger" ]; then
-            echo "::error::Application ID mismatch: $APP_ID"
-            exit 1
-          fi
-          if [ "$VER_NAME" != "1.0" ]; then
-            echo "::error::Version name mismatch: $VER_NAME"
-            exit 1
-          fi
-          if [ "$VER_CODE" != "1" ]; then
-            echo "::error::Version code mismatch: $VER_CODE"
-            exit 1
-          fi
-          
-          # Enforce production API configuration in buildConfigField
-          sed -i 's|"https://dev-api.mahakal.internal/v1"|"https://mahakal-qo14.onrender.com"|g' app/build.gradle.kts
-          sed -i 's|"development"|"production"|g' app/build.gradle.kts
-          
-          # Verify production API URL is present
-          if ! grep -q "https://mahakal-qo14.onrender.com" app/build.gradle.kts && ! grep -q "https://mahakal-qo14.onrender.com" app/src/main/java/com/example/core/network/ApiConfig.kt; then
-            echo "::error::Production API URL https://mahakal-qo14.onrender.com not found in release configuration"
-            exit 1
-          fi
-          
-          # Scan to verify rejecting dev-api.mahakal.internal in build configuration
-          echo "Scanning for prohibited development endpoints in build configuration..."
-          if grep -rn "dev-api.mahakal.internal" app/build.gradle.kts; then
-            echo "::error::Found dev-api.mahakal.internal in build.gradle.kts"
-            exit 1
-          fi
-          echo "Build configuration verified."
+          # Verify production API URL in release buildType
+          assert 'https://mahakal-qo14.onrender.com' in gradle_content, 'Production API URL not configured in build.gradle.kts'
+          assert 'production' in gradle_content, 'Production environment not configured in build.gradle.kts'
+          print('Application identity and build configuration verified successfully.')
+          "
 
       - name: Run Source Security Checks & Tests
         run: |
