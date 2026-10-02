@@ -18,6 +18,11 @@ try:
     if ret2 != 0:
         raise RuntimeError(f"test_rbac_and_ledger.py failed with exit code {ret2}")
 
+    print("\n--- Running Test Suite 3: TLS Certificate Verification ---")
+    ret3 = subprocess.call([sys.executable, "backend/tests/test_tls_verification.py"], env=env)
+    if ret3 != 0:
+        raise RuntimeError(f"test_tls_verification.py failed with exit code {ret3}")
+
     print("\n==========================================")
     print("ALL BACKEND TEST SUITES PASSED SUCCESSFULLY")
     print("==========================================")

@@ -38,6 +38,23 @@ class PgConnectionPool:
         self.port = int(port_str or 5432)
         self.dbname = db_part.split('?')[0]
 
+    def _get_ca_file(self):
+        env_ca = os.environ.get("SUPABASE_CA_CERT") or os.environ.get("PGSSLROOTCERT")
+        if env_ca and os.path.isfile(env_ca):
+            return env_ca
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base_dir, "certs", "prod-ca-2021.crt"),
+            os.path.join(base_dir, "..", "backend", "certs", "prod-ca-2021.crt"),
+            os.path.join(os.getcwd(), "backend", "certs", "prod-ca-2021.crt"),
+            os.path.join(os.getcwd(), "certs", "prod-ca-2021.crt"),
+        ]
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+        return None
+
     def _recv_exact(self, sock, n):
         b = bytearray()
         while len(b) < n:
@@ -95,7 +112,15 @@ class PgConnectionPool:
                     sock.close()
                     raise ConnectionError(f"PostgreSQL server rejected SSL request (code {ssl_resp})")
 
-                ctx = ssl.create_default_context()
+                ca_file = self._get_ca_file()
+                if ca_file:
+                    ctx = ssl.create_default_context(cafile=ca_file)
+                    try:
+                        ctx.load_default_certs()
+                    except Exception:
+                        pass
+                else:
+                    ctx = ssl.create_default_context()
                 ctx.check_hostname = True
                 ctx.verify_mode = ssl.CERT_REQUIRED
                 ssl_sock = ctx.wrap_socket(sock, server_hostname=self.host)
