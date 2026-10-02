@@ -28,8 +28,13 @@ jobs:
     name: Build & Verify Production Android Release
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    environment: production
     permissions:
       contents: read
+    env:
+      KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
+      STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -78,6 +83,7 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
         run: |
           KEYSTORE_FILE="/tmp/release_$(date +%s).jks"
           echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
@@ -143,6 +149,9 @@ jobs:
 
       - name: Build Android Production Release APK & AAB
         env:
+          KEYSTORE_BASE64: ${{ secrets.PROD_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PROD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_mahakal_release_keystore: ${{ env.KEYSTORE_PATH }}
           ORG_GRADLE_PROJECT_mahakal_release_storePassword: ${{ secrets.PROD_STORE_PASSWORD }}
           ORG_GRADLE_PROJECT_mahakal_release_keyAlias: upload
