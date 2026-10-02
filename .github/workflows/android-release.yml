@@ -269,7 +269,7 @@ jobs:
           
           unzip -q -o release-artifacts/MAHAKAL-release.apk -d /tmp/apk_unpacked
           
-          python3 -c "import textwrap; exec(textwrap.dedent('''
+          python3 -c "import textwrap; exec(textwrap.dedent(r'''
           import os, glob, struct, sys
 
           unpacked_dir = '/tmp/apk_unpacked'
