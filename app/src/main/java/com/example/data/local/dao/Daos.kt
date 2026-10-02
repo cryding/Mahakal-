@@ -87,6 +87,12 @@ interface GameDao {
     @Query("SELECT * FROM games WHERE id = :gameId")
     suspend fun getGameById(gameId: String): GameEntity?
 
+    @Query("UPDATE games SET status = :status WHERE id = :gameId")
+    suspend fun updateGameStatus(gameId: String, status: String)
+
+    @Query("UPDATE games SET apiLink = :apiLink WHERE id = :gameId")
+    suspend fun updateGameApiLink(gameId: String, apiLink: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntry(entry: GameEntryEntity)
 

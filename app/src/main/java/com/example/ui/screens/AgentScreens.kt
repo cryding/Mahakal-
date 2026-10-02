@@ -170,15 +170,6 @@ fun AgentDashboardView(
                                 ) {
                                     Text("CREDIT COINS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
-
-                                Button(
-                                    onClick = { viewModel.switchAccount(player.id) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = GoldLight),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, GoldLight),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text("PLAY AS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
                             }
                         }
                     }

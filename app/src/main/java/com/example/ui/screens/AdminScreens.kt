@@ -95,6 +95,8 @@ fun AdminDashboardView(
     var showCreateAgentDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf<UserEntity?>(null) }
     var showCreateGameDialog by remember { mutableStateOf(false) }
+    var showEditGameDialog by remember { mutableStateOf<GameEntity?>(null) }
+    var showConfigApiDialog by remember { mutableStateOf<GameEntity?>(null) }
     var showDeclareResultDialog by remember { mutableStateOf<GameEntity?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -142,12 +144,17 @@ fun AdminDashboardView(
                 agents = agents,
                 onAddAgent = { showCreateAgentDialog = true },
                 onTransferCoins = { showTransferDialog = it },
-                onToggleStatus = { target, newStatus -> viewModel.toggleUserStatus(target.id, newStatus) },
-                onSwitchToAgent = { viewModel.switchAccount(it.id) }
+                onToggleStatus = { agent -> viewModel.toggleAgentStatus(agent) }
             )
             1 -> AdminGamesList(
                 games = games,
                 onCreateGame = { showCreateGameDialog = true },
+                onEditGame = { showEditGameDialog = it },
+                onToggleStatus = { game ->
+                    val newSt = if (game.status == "OPEN") "CLOSED" else "OPEN"
+                    viewModel.toggleGameStatus(game.id, newSt)
+                },
+                onConfigApi = { showConfigApiDialog = it },
                 onDeclareResult = { showDeclareResultDialog = it }
             )
             2 -> AdminOverviewTab(
@@ -344,18 +351,19 @@ fun AdminDashboardView(
         )
     }
 
-    // Create Game Dialog
+    // Create Custom Game Dialog
     if (showCreateGameDialog) {
         var title by remember { mutableStateOf("") }
-        var category by remember { mutableStateOf("MATKA_SINGLE") }
+        var category by remember { mutableStateOf("CUSTOM_API") }
         var multiplier by remember { mutableStateOf("9.5") }
         var minCoins by remember { mutableStateOf("100") }
         var maxCoins by remember { mutableStateOf("25000") }
+        var apiLink by remember { mutableStateOf("") }
 
         AlertDialog(
             onDismissRequest = { showCreateGameDialog = false },
             containerColor = DarkSurfaceCard,
-            title = { Text("Create Live Game", color = GoldPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("Add Custom Game", color = GoldPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -363,6 +371,18 @@ fun AdminDashboardView(
                         onValueChange = { title = it },
                         label = { Text("Game Title (e.g. Kalyan Night)") },
                         modifier = Modifier.fillMaxWidth().testTag("game_title_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    OutlinedTextField(
+                        value = category,
+                        onValueChange = { category = it },
+                        label = { Text("Category / Type") },
+                        modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = GoldPrimary,
                             unfocusedBorderColor = BorderStroke,
@@ -411,6 +431,18 @@ fun AdminDashboardView(
                             )
                         )
                     }
+                    OutlinedTextField(
+                        value = apiLink,
+                        onValueChange = { apiLink = it },
+                        label = { Text("Game API / Stream Link (Optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
                 }
             },
             confirmButton = {
@@ -420,7 +452,7 @@ fun AdminDashboardView(
                         val min = minCoins.toLongOrNull() ?: 50L
                         val max = maxCoins.toLongOrNull() ?: 10000L
                         if (title.isNotBlank()) {
-                            viewModel.createGame(title, category, min, max, mult)
+                            viewModel.createCustomGame(title, category, min, max, mult, apiLink)
                             showCreateGameDialog = false
                         }
                     },
@@ -432,6 +464,156 @@ fun AdminDashboardView(
             },
             dismissButton = {
                 TextButton(onClick = { showCreateGameDialog = false }) {
+                    Text("CANCEL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Edit Game Dialog
+    showEditGameDialog?.let { game ->
+        var editTitle by remember { mutableStateOf(game.title) }
+        var editCategory by remember { mutableStateOf(game.category) }
+        var editMultiplier by remember { mutableStateOf(game.multiplier.toString()) }
+        var editMinCoins by remember { mutableStateOf(game.minCoins.toString()) }
+        var editMaxCoins by remember { mutableStateOf(game.maxCoins.toString()) }
+        var editApiLink by remember { mutableStateOf(game.apiLink) }
+
+        AlertDialog(
+            onDismissRequest = { showEditGameDialog = null },
+            containerColor = DarkSurfaceCard,
+            title = { Text("Edit Game Details", color = GoldPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = editTitle,
+                        onValueChange = { editTitle = it },
+                        label = { Text("Game Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    OutlinedTextField(
+                        value = editMultiplier,
+                        onValueChange = { editMultiplier = it },
+                        label = { Text("Multiplier") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = editMinCoins,
+                            onValueChange = { editMinCoins = it },
+                            label = { Text("Min Coins") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = GoldPrimary,
+                                unfocusedBorderColor = BorderStroke,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            )
+                        )
+                        OutlinedTextField(
+                            value = editMaxCoins,
+                            onValueChange = { editMaxCoins = it },
+                            label = { Text("Max Coins") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = GoldPrimary,
+                                unfocusedBorderColor = BorderStroke,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            )
+                        )
+                    }
+                    OutlinedTextField(
+                        value = editApiLink,
+                        onValueChange = { editApiLink = it },
+                        label = { Text("API / Stream Link") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val mult = editMultiplier.toDoubleOrNull() ?: game.multiplier
+                        val min = editMinCoins.toLongOrNull() ?: game.minCoins
+                        val max = editMaxCoins.toLongOrNull() ?: game.maxCoins
+                        if (editTitle.isNotBlank()) {
+                            viewModel.editGame(game.id, editTitle, editCategory, min, max, mult, editApiLink)
+                            showEditGameDialog = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
+                ) {
+                    Text("SAVE CHANGES", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditGameDialog = null }) {
+                    Text("CANCEL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Configure API Dialog
+    showConfigApiDialog?.let { game ->
+        var apiLinkInput by remember { mutableStateOf(game.apiLink) }
+        AlertDialog(
+            onDismissRequest = { showConfigApiDialog = null },
+            containerColor = DarkSurfaceCard,
+            title = { Text("Configure Game API / Link", color = GoldPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Configure external contest data source or live stream link for ${game.title}:", color = TextSecondary, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = apiLinkInput,
+                        onValueChange = { apiLinkInput = it },
+                        label = { Text("API Endpoint / Stream URL") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.configureGameApi(game.id, apiLinkInput.trim())
+                        showConfigApiDialog = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
+                ) {
+                    Text("SAVE API LINK", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfigApiDialog = null }) {
                     Text("CANCEL", color = TextSecondary)
                 }
             }
@@ -492,8 +674,7 @@ fun AdminAgentsList(
     agents: List<UserEntity>,
     onAddAgent: () -> Unit,
     onTransferCoins: (UserEntity) -> Unit,
-    onToggleStatus: (UserEntity, String) -> Unit,
-    onSwitchToAgent: (UserEntity) -> Unit
+    onToggleStatus: (UserEntity) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -593,11 +774,15 @@ fun AdminAgentsList(
                             }
 
                             Button(
-                                onClick = { onSwitchToAgent(agent) },
-                                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                                onClick = { onToggleStatus(agent) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (agent.status == "ACTIVE") CrimsonRed.copy(alpha = 0.2f) else EmeraldGreen.copy(alpha = 0.2f),
+                                    contentColor = if (agent.status == "ACTIVE") CrimsonRed else EmeraldGreen
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (agent.status == "ACTIVE") CrimsonRed else EmeraldGreen),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
-                                Text("VIEW PORTAL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(if (agent.status == "ACTIVE") "DISABLE" else "ENABLE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -611,6 +796,9 @@ fun AdminAgentsList(
 fun AdminGamesList(
     games: List<GameEntity>,
     onCreateGame: () -> Unit,
+    onEditGame: (GameEntity) -> Unit,
+    onToggleStatus: (GameEntity) -> Unit,
+    onConfigApi: (GameEntity) -> Unit,
     onDeclareResult: (GameEntity) -> Unit
 ) {
     LazyColumn(
@@ -664,12 +852,12 @@ fun AdminGamesList(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(if (game.status == "OPEN") EmeraldGreen.copy(alpha = 0.2f) else GoldDark.copy(alpha = 0.2f))
+                                .background(if (game.status == "OPEN") EmeraldGreen.copy(alpha = 0.2f) else CrimsonRed.copy(alpha = 0.2f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = game.status,
-                                color = if (game.status == "OPEN") EmeraldGreen else GoldLight,
+                                color = if (game.status == "OPEN") EmeraldGreen else CrimsonRed,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -686,6 +874,16 @@ fun AdminGamesList(
                         Text("LIMIT: ${game.minCoins} - ${game.maxCoins} COINS", color = TextSecondary, fontSize = 12.sp)
                     }
 
+                    if (game.apiLink.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "API / LINK: ${game.apiLink}",
+                            color = SaffronAccent,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
+                    }
+
                     if (game.winningOption != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -696,8 +894,48 @@ fun AdminGamesList(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onEditGame(game) },
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("EDIT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { onToggleStatus(game) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (game.status == "OPEN") CrimsonRed.copy(alpha = 0.2f) else EmeraldGreen.copy(alpha = 0.2f),
+                                contentColor = if (game.status == "OPEN") CrimsonRed else EmeraldGreen
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (game.status == "OPEN") CrimsonRed else EmeraldGreen),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (game.status == "OPEN") "DISABLE" else "ENABLE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { onConfigApi(game) },
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = TextSecondary),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("API", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     if (game.status == "OPEN") {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = { onDeclareResult(game) },
                             modifier = Modifier.fillMaxWidth(),

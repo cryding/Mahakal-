@@ -98,7 +98,6 @@ fun MahakalApp(viewModel: MahakalViewModel) {
         val user = currentUser!!
         val agents by viewModel.allAgents.collectAsState()
         val allUsers by viewModel.allUsers.collectAsState()
-        val allAccounts by viewModel.allAccounts.collectAsState()
         val agentUsers by viewModel.agentUsers.collectAsState()
         val allGames by viewModel.allGames.collectAsState()
         val activeGames by viewModel.activeGames.collectAsState()
@@ -259,9 +258,7 @@ fun MahakalApp(viewModel: MahakalViewModel) {
         if (showProfileDialog) {
             ProfileDialog(
                 user = user,
-                allAccounts = allAccounts,
                 onDismiss = { showProfileDialog = false },
-                onSwitchUser = { viewModel.switchAccount(it) },
                 onLogout = { viewModel.logout() }
             )
         }

@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,26 +13,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Login
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +49,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.UserEntity
@@ -54,9 +60,6 @@ import com.example.ui.theme.BorderStroke
 import com.example.ui.theme.CrimsonRed
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurfaceCard
-import com.example.ui.theme.DarkSurfaceVariant
-import com.example.ui.theme.EmeraldGreen
-import com.example.ui.theme.GoldDark
 import com.example.ui.theme.GoldLight
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.SaffronAccent
@@ -69,6 +72,8 @@ import com.example.ui.viewmodel.MahakalViewModel
 fun LoginScreen(viewModel: MahakalViewModel) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    val isLoading by viewModel.isLoading.collectAsState()
 
     Box(
         modifier = Modifier
@@ -115,7 +120,7 @@ fun LoginScreen(viewModel: MahakalViewModel) {
                 )
 
                 Text(
-                    text = "Hierarchical Virtual Coin Management",
+                    text = "Authoritative Cloud Coin Platform",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -125,8 +130,13 @@ fun LoginScreen(viewModel: MahakalViewModel) {
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("Username") },
-                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = GoldPrimary) },
+                    label = { Text("Username / User ID") },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = "Username", tint = GoldPrimary) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Next
+                    ),
                     modifier = Modifier.fillMaxWidth().testTag("username_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = GoldPrimary,
@@ -142,8 +152,29 @@ fun LoginScreen(viewModel: MahakalViewModel) {
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password") },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = GoldPrimary) },
-                    visualTransformation = PasswordVisualTransformation(),
+                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password", tint = GoldPrimary) },
+                    trailingIcon = {
+                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                            Icon(
+                                imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
+                                tint = TextMuted
+                            )
+                        }
+                    },
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (username.isNotBlank() && password.isNotBlank() && !isLoading) {
+                                viewModel.login(username, password)
+                            }
+                        }
+                    ),
                     modifier = Modifier.fillMaxWidth().testTag("password_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = GoldPrimary,
@@ -153,115 +184,54 @@ fun LoginScreen(viewModel: MahakalViewModel) {
                     )
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = {
-                        if (username.isNotBlank() && password.isNotBlank()) {
+                        if (username.isNotBlank() && password.isNotBlank() && !isLoading) {
                             viewModel.login(username, password)
                         }
                     },
+                    enabled = !isLoading && username.isNotBlank() && password.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().height(48.dp).testTag("login_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GoldPrimary,
+                        contentColor = Color.Black,
+                        disabledContainerColor = GoldPrimary.copy(alpha = 0.4f),
+                        disabledContentColor = Color.Black.copy(alpha = 0.5f)
+                    ),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Icon(Icons.Default.Login, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("SECURE SIGN IN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color = Color.Black,
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("LOGIN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "QUICK DEMO ROLE SWITCHER",
+                    text = "Protected by server-side cryptographic authentication & zero-trust RBAC.",
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = GoldLight,
-                    letterSpacing = 1.sp
+                    color = TextMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    QuickRoleButton(
-                        label = "SUPER ADMIN",
-                        role = "ADMIN",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.switchAccount("admin_master") }
-                    )
-                    QuickRoleButton(
-                        label = "DELHI AGENT",
-                        role = "AGENT",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.switchAccount("agent_delhi") }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    QuickRoleButton(
-                        label = "PLAYER RAJ",
-                        role = "USER",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.switchAccount("player_raj") }
-                    )
-                    QuickRoleButton(
-                        label = "PLAYER VIKRAM",
-                        role = "USER",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.switchAccount("player_vikram") }
-                    )
-                }
             }
         }
     }
 }
 
 @Composable
-fun QuickRoleButton(
-    label: String,
-    role: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val borderColor = when (role) {
-        "ADMIN" -> CrimsonRed
-        "AGENT" -> GoldPrimary
-        else -> EmeraldGreen
-    }
-
-    Box(
-        modifier = modifier
-            .height(38.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceVariant)
-            .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-    }
-}
-
-@Composable
 fun ProfileDialog(
     user: UserEntity,
-    allAccounts: List<UserEntity>,
     onDismiss: () -> Unit,
-    onSwitchUser: (String) -> Unit,
     onLogout: () -> Unit
 ) {
     AlertDialog(
@@ -271,7 +241,7 @@ fun ProfileDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Shield, contentDescription = null, tint = GoldPrimary)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Account & RBAC Role", color = GoldPrimary, fontWeight = FontWeight.Bold)
+                Text("Account & Security", color = GoldPrimary, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -280,35 +250,7 @@ fun ProfileDialog(
                 Text(text = "Username: @${user.username}", color = TextSecondary, fontSize = 13.sp)
                 Text(text = "Role: ${user.role}", color = GoldLight, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Text(text = "Coin Balance: ${formatCoins(user.balance)}", color = Color.White, fontWeight = FontWeight.Black)
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(text = "SWITCH DEMO SESSION:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = GoldLight)
-
-                allAccounts.forEach { acc ->
-                    val isCurrent = acc.id == user.id
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSwitchUser(acc.id)
-                                onDismiss()
-                            },
-                        colors = CardDefaults.cardColors(containerColor = if (isCurrent) GoldDark.copy(alpha = 0.3f) else DarkSurfaceVariant),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(acc.fullName, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                Text("${acc.role} • ${acc.username}", color = TextSecondary, fontSize = 10.sp)
-                            }
-                            RoleBadge(role = acc.role)
-                        }
-                    }
-                }
+                Text(text = "Status: ${user.status}", color = TextSecondary, fontSize = 12.sp)
             }
         },
         confirmButton = {
@@ -317,9 +259,10 @@ fun ProfileDialog(
                     onLogout()
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed, contentColor = Color.White)
+                colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed, contentColor = Color.White),
+                modifier = Modifier.testTag("logout_button")
             ) {
-                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("LOGOUT")
             }

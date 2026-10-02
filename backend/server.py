@@ -636,7 +636,9 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
 
         # Public Login
         if path in ("/v1/auth/login", "/auth/login"):
-            login_id = data.get("loginId", "").strip()
+            login_id = data.get("loginId") or data.get("username", "")
+            if isinstance(login_id, str):
+                login_id = login_id.strip()
             password = data.get("password", "")
             if not login_id or not password:
                 self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "VALIDATION_ERROR", "message": "Login ID and password required", "requestId": req_id})
@@ -647,7 +649,7 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                 return
             acc = rows[0]
             if acc["status"] != "ACTIVE":
-                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "ACCOUNT_SUSPENDED", "message": "Account has been suspended.", "requestId": req_id})
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "ACCOUNT_SUSPENDED", "message": "Account has been suspended or deactivated.", "requestId": req_id})
                 return
 
             now = int(time.time() * 1000)
@@ -661,7 +663,17 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
 
             self._send_json(200, {
                 "success": True,
+                "authenticated": True,
                 "statusCode": 200,
+                "session": access_token,
+                "user": {
+                    "id": acc["id"],
+                    "username": acc["login_id"],
+                    "loginId": acc["login_id"],
+                    "role": acc["role"],
+                    "status": acc["status"],
+                    "fullName": acc["full_name"]
+                },
                 "data": {
                     "accessToken": access_token,
                     "refreshToken": refresh_token,
@@ -669,6 +681,7 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                     "user": {
                         "id": acc["id"],
                         "loginId": acc["login_id"],
+                        "username": acc["login_id"],
                         "role": acc["role"],
                         "status": acc["status"],
                         "fullName": acc["full_name"],
@@ -1136,6 +1149,77 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                 pg_pool.execute(f"INSERT INTO game_options (option_id, game_id, option_code, display_name) VALUES ('{oid}', '{gid}', {escape_sql(opt.get('optionCode'))}, {escape_sql(opt.get('displayName'))});")
             log_audit(user["accountId"], user["role"], "GAME_CREATED", gid, "GAME", req_id)
             self._send_json(201, {"success": True, "statusCode": 201, "data": {"gameId": gid, "title": title}, "requestId": req_id})
+            return
+
+        # Admin: Enable / Disable Agent or Account status (RBAC: ADMIN only)
+        if path in ("/v1/admin/agents/status", "/admin/agents/status", "/v1/admin/accounts/status"):
+            if user["role"] != "ADMIN":
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Only Administrators can modify account status.", "requestId": req_id})
+                return
+            target_id = data.get("accountId") or data.get("agentId")
+            new_status = (data.get("status") or "ACTIVE").upper()
+            if new_status not in ("ACTIVE", "SUSPENDED", "DISABLED"):
+                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "VALIDATION_ERROR", "message": "Status must be ACTIVE, SUSPENDED, or DISABLED.", "requestId": req_id})
+                return
+            target_acc = pg_pool.execute(f"SELECT id, role, login_id FROM accounts WHERE id = {escape_sql(target_id)};")
+            if not target_acc:
+                self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "ACCOUNT_NOT_FOUND", "message": "Target account not found.", "requestId": req_id})
+                return
+            now = int(time.time() * 1000)
+            pg_pool.execute(f"UPDATE accounts SET status = '{new_status}', updated_at = {now} WHERE id = '{target_id}';")
+            if new_status in ("SUSPENDED", "DISABLED"):
+                pg_pool.execute(f"UPDATE sessions SET is_revoked = TRUE WHERE account_id = '{target_id}';")
+            log_audit(user["accountId"], user["role"], f"ACCOUNT_STATUS_{new_status}", target_id, "ACCOUNT", req_id)
+            self._send_json(200, {"success": True, "statusCode": 200, "data": {"accountId": target_id, "status": new_status}, "requestId": req_id})
+            return
+
+        # Admin: Edit Custom Game (RBAC: ADMIN only)
+        if path in ("/v1/admin/games/edit", "/admin/games/edit", "/v1/admin/games/update"):
+            if user["role"] != "ADMIN":
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Only Administrators can edit games.", "requestId": req_id})
+                return
+            game_id = data.get("gameId")
+            title = data.get("title")
+            desc = data.get("description")
+            mult = data.get("rewardMultiplier") or data.get("multiplier")
+            min_c = data.get("minCoins")
+            max_c = data.get("maxCoins")
+            now = int(time.time() * 1000)
+            updates = [f"updated_at = {now}"]
+            if title: updates.append(f"title = {escape_sql(title)}")
+            if desc: updates.append(f"description = {escape_sql(desc)}")
+            if mult is not None: updates.append(f"reward_multiplier = {float(mult)}")
+            if min_c is not None: updates.append(f"min_coins = {int(min_c)}")
+            if max_c is not None: updates.append(f"max_coins = {int(max_c)}")
+            pg_pool.execute(f"UPDATE games SET {', '.join(updates)} WHERE game_id = {escape_sql(game_id)};")
+            log_audit(user["accountId"], user["role"], "GAME_UPDATED", game_id, "GAME", req_id)
+            self._send_json(200, {"success": True, "statusCode": 200, "data": {"gameId": game_id}, "requestId": req_id})
+            return
+
+        # Admin: Enable / Disable Game (RBAC: ADMIN only)
+        if path in ("/v1/admin/games/status", "/admin/games/status", "/v1/admin/games/toggle-status"):
+            if user["role"] != "ADMIN":
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Only Administrators can toggle game status.", "requestId": req_id})
+                return
+            game_id = data.get("gameId")
+            status_val = (data.get("status") or "OPEN").upper()
+            now = int(time.time() * 1000)
+            pg_pool.execute(f"UPDATE games SET status = '{status_val}', updated_at = {now} WHERE game_id = {escape_sql(game_id)};")
+            log_audit(user["accountId"], user["role"], f"GAME_STATUS_{status_val}", game_id, "GAME", req_id)
+            self._send_json(200, {"success": True, "statusCode": 200, "data": {"gameId": game_id, "status": status_val}, "requestId": req_id})
+            return
+
+        # Admin: Configure Game API / Link (RBAC: ADMIN only)
+        if path in ("/v1/admin/games/config-api", "/admin/games/config-api"):
+            if user["role"] != "ADMIN":
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Only Administrators can configure game APIs.", "requestId": req_id})
+                return
+            game_id = data.get("gameId")
+            api_link = data.get("apiLink", "").strip()
+            now = int(time.time() * 1000)
+            pg_pool.execute(f"UPDATE games SET description = {escape_sql(api_link)}, updated_at = {now} WHERE game_id = {escape_sql(game_id)};")
+            log_audit(user["accountId"], user["role"], "GAME_API_CONFIGURED", game_id, "GAME", req_id)
+            self._send_json(200, {"success": True, "statusCode": 200, "data": {"gameId": game_id, "apiLink": api_link}, "requestId": req_id})
             return
 
         # Admin: Finalize Game Result (RBAC: ADMIN only)

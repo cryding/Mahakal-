@@ -164,7 +164,7 @@ fun AppHeader(
 fun BalanceCard(
     user: UserEntity,
     onMintCoins: (() -> Unit)? = null,
-    onTransferCoins: () -> Unit
+    onTransferCoins: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -276,34 +276,36 @@ fun BalanceCard(
                         }
                     }
 
-                    Surface(
-                        onClick = onTransferCoins,
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (user.role == "ADMIN") DarkBackground else GoldPrimary,
-                        border = if (user.role == "ADMIN") androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary) else null,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp)
-                            .testTag("transfer_coins_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                    if (onTransferCoins != null && user.role in listOf("ADMIN", "AGENT")) {
+                        Surface(
+                            onClick = onTransferCoins,
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (user.role == "ADMIN") DarkBackground else GoldPrimary,
+                            border = if (user.role == "ADMIN") androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary) else null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("transfer_coins_button")
                         ) {
-                            Icon(
-                                Icons.Default.SwapHoriz,
-                                contentDescription = null,
-                                tint = if (user.role == "ADMIN") GoldPrimary else Color.Black,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (user.role == "USER") "REQUEST DEPOSIT" else "TRANSFER COINS",
-                                color = if (user.role == "ADMIN") GoldPrimary else Color.Black,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.SwapHoriz,
+                                    contentDescription = null,
+                                    tint = if (user.role == "ADMIN") GoldPrimary else Color.Black,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "TRANSFER COINS",
+                                    color = if (user.role == "ADMIN") GoldPrimary else Color.Black,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }

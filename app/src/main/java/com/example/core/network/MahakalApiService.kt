@@ -35,11 +35,71 @@ interface MahakalApiService {
     suspend fun getMyWallet(): Response<ServerResponse<Map<String, Any>>>
 
     @GET("v1/wallets/transactions")
-    suspend fun getWalletTransactions(): Response<ServerResponse<Map<String, Any>>>
+    suspend fun getWalletTransactions(): Response<ServerResponse<List<Map<String, Any>>>>
 
     @POST("v1/wallets/transfer")
     suspend fun transferVirtualCoins(
         @Header("Idempotency-Key") idempotencyKey: String,
         @Body request: Map<String, Any>
     ): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/games")
+    suspend fun getGames(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @GET("v1/games/my-entries")
+    suspend fun getMyGameEntries(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @POST("v1/games/enter")
+    suspend fun enterGame(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body request: Map<String, Any>
+    ): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/admin/agents")
+    suspend fun getAdminAgents(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @POST("v1/admin/agents")
+    suspend fun createAgent(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/agents/status")
+    suspend fun updateAgentStatus(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/admin/users")
+    suspend fun getAdminUsers(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @POST("v1/admin/users")
+    suspend fun createAdminUser(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/agent/users")
+    suspend fun getAgentUsers(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @POST("v1/agent/users")
+    suspend fun createAgentUser(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/games/create")
+    suspend fun createGame(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/games/edit")
+    suspend fun editGame(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/games/status")
+    suspend fun updateGameStatus(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/games/config-api")
+    suspend fun configGameApi(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/admin/games/finalize-result")
+    suspend fun finalizeGameResult(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/admin/audit-logs")
+    suspend fun getAuditLogs(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @GET("v1/admin/security/dashboard")
+    suspend fun getSecurityDashboard(): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/notifications")
+    suspend fun getNotifications(): Response<ServerResponse<List<Map<String, Any>>>>
+
+    @POST("v1/notifications/read")
+    suspend fun markNotificationRead(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
 }

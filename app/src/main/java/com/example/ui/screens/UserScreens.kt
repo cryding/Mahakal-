@@ -63,10 +63,7 @@ fun UserDashboardView(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         BalanceCard(
-            user = user,
-            onTransferCoins = {
-                viewModel.transferCoins("admin_master", 1000, "User coin return")
-            }
+            user = user
         )
 
         LazyColumn(

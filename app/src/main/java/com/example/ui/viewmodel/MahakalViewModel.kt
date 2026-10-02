@@ -16,16 +16,19 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() {
 
     private val _currentUser = MutableStateFlow<UserEntity?>(null)
     val currentUser: StateFlow<UserEntity?> = _currentUser.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage = _snackbarMessage.asSharedFlow()
@@ -36,9 +39,20 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
     init {
         viewModelScope.launch {
             repository.bootstrapInitialData()
-            // Default auto-login to Admin for instant preview inspection, or user can switch freely
-            val admin = repository.getUserById("admin_master")
-            _currentUser.value = admin
+            // Validate server session strictly on launch.
+            // On a fresh install with no session or token, _currentUser remains null, ensuring LoginScreen is shown.
+            _isLoading.value = true
+            try {
+                val sessionUser = repository.validateSession()
+                _currentUser.value = sessionUser
+                if (sessionUser != null) {
+                    refreshCurrentUser()
+                }
+            } catch (_: Exception) {
+                _currentUser.value = null
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -46,33 +60,43 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
         _activeTab.value = tab
     }
 
-    fun switchAccount(userId: String) {
-        viewModelScope.launch {
-            val user = repository.getUserById(userId)
-            if (user != null) {
-                _currentUser.value = user
-                _activeTab.value = "HOME"
-                _snackbarMessage.emit("Switched profile to ${user.fullName} (${user.role})")
-            }
-        }
-    }
-
     fun login(username: String, pass: String) {
+        val trimmedUser = username.trim()
+        val trimmedPass = pass.trim()
+        if (trimmedUser.isBlank() || trimmedPass.isBlank()) {
+            viewModelScope.launch {
+                _snackbarMessage.emit("Username and password are required")
+            }
+            return
+        }
+
+        _isLoading.value = true
         viewModelScope.launch {
-            val user = repository.authenticate(username, pass)
-            if (user != null) {
-                _currentUser.value = user
-                _activeTab.value = "HOME"
-                _snackbarMessage.emit("Welcome back, ${user.fullName}")
-            } else {
-                _snackbarMessage.emit("Invalid credentials or account frozen")
+            try {
+                val user = repository.authenticate(trimmedUser, trimmedPass)
+                if (user != null) {
+                    _currentUser.value = user
+                    _activeTab.value = "HOME"
+                    _snackbarMessage.emit("Welcome, ${user.fullName}")
+                    refreshCurrentUser()
+                } else {
+                    _snackbarMessage.emit("Invalid credentials. Please verify your ID and password.")
+                }
+            } catch (e: Exception) {
+                _snackbarMessage.emit(e.message ?: "Authentication failed. Please verify connection.")
+            } finally {
+                _isLoading.value = false
             }
         }
     }
 
     fun logout() {
-        _currentUser.value = null
-        _activeTab.value = "HOME"
+        viewModelScope.launch {
+            repository.logout()
+            _currentUser.value = null
+            _activeTab.value = "HOME"
+            _snackbarMessage.emit("Logged out securely")
+        }
     }
 
     // Refresh current user data (balance updates)
@@ -155,6 +179,8 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
 
     // Admin / Agent Actions
     fun createAgent(username: String, fullName: String, initialCoins: Long) {
+        val admin = _currentUser.value ?: return
+        if (admin.role != "ADMIN") return
         viewModelScope.launch {
             val res = repository.createAgent(username, fullName, initialCoins)
             if (res.isSuccess) {
@@ -166,8 +192,24 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
         }
     }
 
+    fun toggleAgentStatus(agent: UserEntity) {
+        val admin = _currentUser.value ?: return
+        if (admin.role != "ADMIN") return
+        val newStatus = if (agent.status == "ACTIVE") "DISABLED" else "ACTIVE"
+        viewModelScope.launch {
+            val res = repository.toggleAgentStatus(agent.id, newStatus)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Agent status updated to $newStatus")
+                refreshCurrentUser()
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to update agent status")
+            }
+        }
+    }
+
     fun createUserUnderAgent(username: String, fullName: String, initialCoins: Long) {
         val agent = _currentUser.value ?: return
+        if (agent.role != "AGENT") return
         viewModelScope.launch {
             val res = repository.createUserUnderAgent(agent.id, username, fullName, initialCoins)
             if (res.isSuccess) {
@@ -181,6 +223,12 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
 
     fun transferCoins(recipientId: String, amount: Long, notes: String) {
         val actor = _currentUser.value ?: return
+        if (actor.role !in listOf("ADMIN", "AGENT")) {
+            viewModelScope.launch {
+                _snackbarMessage.emit("Only Administrators and Agents can transfer coins")
+            }
+            return
+        }
         viewModelScope.launch {
             val res = repository.transferCoins(actor, recipientId, amount, notes)
             if (res.isSuccess) {
@@ -206,6 +254,7 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
 
     fun toggleUserStatus(targetUserId: String, newStatus: String) {
         val actor = _currentUser.value ?: return
+        if (actor.role != "ADMIN") return
         viewModelScope.launch {
             val res = repository.toggleUserStatus(actor, targetUserId, newStatus)
             if (res.isSuccess) {
@@ -216,12 +265,72 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
 
     // Game Actions
     fun createGame(title: String, category: String, minCoins: Long, maxCoins: Long, multiplier: Double) {
+        createCustomGame(title, category, minCoins, maxCoins, multiplier, "")
+    }
+
+    fun createCustomGame(
+        title: String,
+        category: String,
+        minCoins: Long,
+        maxCoins: Long,
+        multiplier: Double,
+        apiLink: String
+    ) {
         val admin = _currentUser.value ?: return
         if (admin.role != "ADMIN") return
         viewModelScope.launch {
-            val res = repository.createGame(admin, title, category, minCoins, maxCoins, multiplier)
+            val res = repository.createGame(admin, title, category, minCoins, maxCoins, multiplier, apiLink)
             if (res.isSuccess) {
-                _snackbarMessage.emit("Game '${title}' published successfully")
+                _snackbarMessage.emit("Custom game '${title}' published successfully")
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to publish game")
+            }
+        }
+    }
+
+    fun editGame(
+        gameId: String,
+        title: String,
+        category: String,
+        minCoins: Long,
+        maxCoins: Long,
+        multiplier: Double,
+        apiLink: String
+    ) {
+        val admin = _currentUser.value ?: return
+        if (admin.role != "ADMIN") return
+        viewModelScope.launch {
+            val res = repository.editGame(admin, gameId, title, category, minCoins, maxCoins, multiplier, apiLink)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Game '${title}' updated successfully")
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to update game")
+            }
+        }
+    }
+
+    fun toggleGameStatus(gameId: String, newStatus: String) {
+        val admin = _currentUser.value ?: return
+        if (admin.role != "ADMIN") return
+        viewModelScope.launch {
+            val res = repository.toggleGameStatus(admin, gameId, newStatus)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Game status updated to $newStatus")
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to toggle game status")
+            }
+        }
+    }
+
+    fun configureGameApi(gameId: String, apiLink: String) {
+        val admin = _currentUser.value ?: return
+        if (admin.role != "ADMIN") return
+        viewModelScope.launch {
+            val res = repository.configureGameApi(admin, gameId, apiLink)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Game API configured to $apiLink")
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to configure API")
             }
         }
     }

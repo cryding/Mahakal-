@@ -42,7 +42,8 @@ data class GameEntity(
     val status: String, // "OPEN", "LOCKED", "COMPLETED", "CANCELLED"
     val winningOption: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val closesAt: Long = System.currentTimeMillis() + 3600000
+    val closesAt: Long = System.currentTimeMillis() + 3600000,
+    val apiLink: String = ""
 )
 
 @Entity(tableName = "game_entries")

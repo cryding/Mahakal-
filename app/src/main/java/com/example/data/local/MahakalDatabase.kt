@@ -25,7 +25,7 @@ import com.example.data.local.entity.UserEntity
         AuditLogEntity::class,
         NotificationEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MahakalDatabase : RoomDatabase() {
