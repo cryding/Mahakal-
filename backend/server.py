@@ -96,8 +96,8 @@ class PgConnectionPool:
                     raise ConnectionError(f"PostgreSQL server rejected SSL request (code {ssl_resp})")
 
                 ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
                 ssl_sock = ctx.wrap_socket(sock, server_hostname=self.host)
 
                 # Startup Message
@@ -980,13 +980,29 @@ def bootstrap_initial_accounts(pool):
     """Seed authoritative Master Admin account in Supabase PostgreSQL if empty."""
     admins = pool.execute("SELECT count(*) as count FROM accounts WHERE role = 'ADMIN';")
     if int(admins[0]["count"]) == 0:
+        bootstrap_password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+        if not bootstrap_password:
+            raise RuntimeError(
+                "FATAL: Database contains no ADMIN account and BOOTSTRAP_ADMIN_PASSWORD environment variable is missing. "
+                "Set BOOTSTRAP_ADMIN_PASSWORD (minimum 12 characters) to initialize the Master Administrator."
+            )
+        if len(bootstrap_password) < 12:
+            raise ValueError(
+                "FATAL: BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters in length."
+            )
         now = int(time.time() * 1000)
         admin_id = str(uuid.uuid4())
         salt = os.urandom(16).hex()
-        pwd_hash = hash_password("AdminPassword@123", salt)
-        pool.execute(f"INSERT INTO accounts (id, login_id, password_hash, salt, role, status, full_name, created_at, updated_at) VALUES ('{admin_id}', 'admin', '{pwd_hash}', '{salt}', 'ADMIN', 'ACTIVE', 'Mahakal Chief Administrator', {now}, {now});")
+        pwd_hash = hash_password(bootstrap_password, salt)
+        pool.execute(
+            f"INSERT INTO accounts (id, login_id, password_hash, salt, role, status, full_name, must_change_password, created_at, updated_at) "
+            f"VALUES ('{admin_id}', 'admin', '{pwd_hash}', '{salt}', 'ADMIN', 'ACTIVE', 'Mahakal Chief Administrator', TRUE, {now}, {now});"
+        )
         w_id = str(uuid.uuid4())
-        pool.execute(f"INSERT INTO wallets (wallet_id, owner_id, owner_role, balance, created_at, updated_at) VALUES ('{w_id}', '{admin_id}', 'ADMIN', 1000000, {now}, {now});")
+        pool.execute(
+            f"INSERT INTO wallets (wallet_id, owner_id, owner_role, balance, created_at, updated_at) "
+            f"VALUES ('{w_id}', '{admin_id}', 'ADMIN', 1000000, {now}, {now});"
+        )
         print("[BOOTSTRAP] Provisioned Master Administrator and Genesis Virtual Coin Wallet in Supabase PostgreSQL")
 
 

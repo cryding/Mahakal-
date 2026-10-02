@@ -36,7 +36,8 @@ assert status == 401, f"Expected 401, got {status}"
 print("Unauthorized Guard: PASS", res["errorCode"])
 
 print("\n--- 4. Testing Admin Login ---")
-status, res = request("/v1/auth/login", method="POST", data={"loginId": "admin", "password": "AdminPassword@123"})
+admin_pwd = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+status, res = request("/v1/auth/login", method="POST", data={"loginId": "admin", "password": admin_pwd})
 assert status == 200, f"Expected 200, got {status}: {res}"
 admin_token = res["data"]["accessToken"]
 admin_id = res["data"]["user"]["id"]

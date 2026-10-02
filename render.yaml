@@ -22,3 +22,5 @@ services:
         sync: false
       - key: ENCRYPTION_KEY
         sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false

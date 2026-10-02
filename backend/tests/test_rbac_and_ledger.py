@@ -21,7 +21,8 @@ def request(path, method="GET", data=None, token=None, idempotency_key=None):
 print("=== Phase 2: RBAC & Virtual Coin Ledger Integrity Tests ===")
 
 # 1. Login as Admin
-s, login_res = request("/v1/auth/login", method="POST", data={"loginId": "admin", "password": "AdminPassword@123"})
+admin_pwd = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+s, login_res = request("/v1/auth/login", method="POST", data={"loginId": "admin", "password": admin_pwd})
 assert s == 200
 admin_token = login_res["data"]["accessToken"]
 admin_id = login_res["data"]["user"]["id"]

@@ -34,7 +34,7 @@
   ```json
   {
     "loginId": "admin",
-    "password": "AdminPassword@123"
+    "password": "<admin_password>"
   }
   ```
 - **Response (200 OK)**:

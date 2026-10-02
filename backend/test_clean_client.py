@@ -15,8 +15,8 @@ class CleanPgClient:
         s.sendall(struct.pack('!II', 8, 80877103))
         s.recv(1)
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
         self.sock = ctx.wrap_socket(s, server_hostname=host)
         params = b'user\x00' + user.encode('utf-8') + b'\x00database\x00' + dbname.encode('utf-8') + b'\x00\x00'
         self.sock.sendall(struct.pack('!II', 8 + len(params), 196608) + params)
