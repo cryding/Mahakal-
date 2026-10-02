@@ -1,4 +1,4 @@
-import urllib.request, json, time, uuid
+import os, urllib.request, json, time, uuid
 
 BASE_URL = "http://127.0.0.1:8899"
 

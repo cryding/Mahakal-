@@ -11,7 +11,7 @@ Enforces:
  - 100% Non-Monetary Virtual Coin Architecture
 """
 
-import os, sys, re, json, time, uuid, socket, ssl, struct, base64, hashlib, hmac, threading, signal
+import os, sys, re, json, time, uuid, socket, ssl, struct, base64, hashlib, hmac, threading, signal, contextlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -175,69 +175,103 @@ class PgConnectionPool:
                 else:
                     raise last_error
 
-    def execute(self, sql):
+    def _execute_on_socket(self, sock, sql):
+        q = sql.encode('utf-8') + b'\x00'
+        sock.sendall(b'Q' + struct.pack('!I', 4 + len(q)) + q)
+        rows = []
+        col_names = []
+        err = None
+        while True:
+            t = self._recv_exact(sock, 1)
+            pl = struct.unpack('!I', self._recv_exact(sock, 4))[0]
+            payload = self._recv_exact(sock, pl - 4)
+            if t == b'T':
+                num_fields = struct.unpack('!H', payload[:2])[0]
+                offset = 2
+                col_names = []
+                for _ in range(num_fields):
+                    null_idx = payload.find(b'\x00', offset)
+                    name = payload[offset:null_idx].decode('utf-8')
+                    col_names.append(name)
+                    offset = null_idx + 1 + 18
+            elif t == b'D':
+                num_fields = struct.unpack('!H', payload[:2])[0]
+                offset = 2
+                row = []
+                for _ in range(num_fields):
+                    flen = struct.unpack('!i', payload[offset:offset+4])[0]
+                    offset += 4
+                    if flen == -1:
+                        row.append(None)
+                    else:
+                        row.append(payload[offset:offset+flen].decode('utf-8'))
+                        offset += flen
+                rows.append(row)
+            elif t == b'E':
+                err = payload.decode('utf-8', errors='ignore')
+            elif t == b'Z':
+                break
+
+        if err:
+            raise Exception(f'PostgreSQL query error: {err}')
+
+        if col_names and rows:
+            return [dict(zip(col_names, r)) for r in rows]
+        return rows
+
+    def checkout(self):
         with self._lock:
-            sock = None
             if self._pool:
-                sock = self._pool.pop()
-            else:
-                sock = self._create_connection()
+                return self._pool.pop()
+        return self._create_connection()
 
-        try:
-            q = sql.encode('utf-8') + b'\x00'
-            sock.sendall(b'Q' + struct.pack('!I', 4 + len(q)) + q)
-            rows = []
-            col_names = []
-            err = None
-            while True:
-                t = self._recv_exact(sock, 1)
-                pl = struct.unpack('!I', self._recv_exact(sock, 4))[0]
-                payload = self._recv_exact(sock, pl - 4)
-                if t == b'T':
-                    num_fields = struct.unpack('!H', payload[:2])[0]
-                    offset = 2
-                    col_names = []
-                    for _ in range(num_fields):
-                        null_idx = payload.find(b'\x00', offset)
-                        name = payload[offset:null_idx].decode('utf-8')
-                        col_names.append(name)
-                        offset = null_idx + 1 + 18
-                elif t == b'D':
-                    num_fields = struct.unpack('!H', payload[:2])[0]
-                    offset = 2
-                    row = []
-                    for _ in range(num_fields):
-                        flen = struct.unpack('!i', payload[offset:offset+4])[0]
-                        offset += 4
-                        if flen == -1:
-                            row.append(None)
-                        else:
-                            row.append(payload[offset:offset+flen].decode('utf-8'))
-                            offset += flen
-                    rows.append(row)
-                elif t == b'E':
-                    err = payload.decode('utf-8', errors='ignore')
-                elif t == b'Z':
-                    break
-
-            if err:
-                raise Exception(f'PostgreSQL query error: {err}')
-
-            with self._lock:
-                if len(self._pool) < self.pool_size:
-                    self._pool.append(sock)
-                else:
-                    sock.close()
-
-            if col_names and rows:
-                return [dict(zip(col_names, r)) for r in rows]
-            return rows
-        except Exception as e:
+    def checkin(self, sock, discard=False):
+        if discard:
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
-            raise e
+            return
+        with self._lock:
+            if len(self._pool) < self.pool_size:
+                self._pool.append(sock)
+                return
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+    @contextlib.contextmanager
+    def transaction(self):
+        sock = self.checkout()
+        conn = PgConnection(self, sock)
+        discard = False
+        try:
+            conn.execute("BEGIN;")
+            conn._in_transaction = True
+            yield conn
+            if conn._in_transaction:
+                conn.commit()
+        except Exception:
+            discard = True
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            self.checkin(sock, discard=discard)
+
+    def execute(self, sql):
+        sock = self.checkout()
+        discard = False
+        try:
+            return self._execute_on_socket(sock, sql)
+        except Exception:
+            discard = True
+            raise
+        finally:
+            self.checkin(sock, discard=discard)
 
     def close(self):
         with self._lock:
@@ -247,6 +281,33 @@ class PgConnectionPool:
                 except Exception:
                     pass
             self._pool.clear()
+
+
+class PgConnection:
+    """Pinned physical PostgreSQL connection dedicated to a single transaction."""
+    def __init__(self, pool, sock):
+        self.pool = pool
+        self.sock = sock
+        self._in_transaction = False
+        self._is_closed = False
+
+    def execute(self, sql):
+        if self._is_closed:
+            raise ConnectionError("Attempted query execution on closed connection")
+        return self.pool._execute_on_socket(self.sock, sql)
+
+    def commit(self):
+        if self._in_transaction and not self._is_closed:
+            self.execute("COMMIT;")
+            self._in_transaction = False
+
+    def rollback(self):
+        if self._in_transaction and not self._is_closed:
+            try:
+                self.execute("ROLLBACK;")
+            except Exception:
+                pass
+            self._in_transaction = False
 
 
 def escape_sql(val):
@@ -724,7 +785,11 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
             dest_acc_id = data.get("destinationAccountId")
             amount = int(data.get("amount", 0))
             reason = data.get("reason", "Transfer")
-            idempotency_key = self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or str(uuid.uuid4())
+            idempotency_key = (self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or "").strip()
+
+            if not idempotency_key:
+                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "VALIDATION_ERROR", "message": "Idempotency-Key is required.", "requestId": req_id})
+                return
 
             if amount <= 0:
                 self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_AMOUNT", "message": "Amount must be greater than zero.", "requestId": req_id})
@@ -733,49 +798,89 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
             # Check existing idempotency
             existing = pg_pool.execute(f"SELECT * FROM wallet_transactions WHERE idempotency_key = {escape_sql(idempotency_key)};")
             if existing:
-                self._send_json(200, {"success": True, "statusCode": 200, "data": existing[0], "requestId": req_id})
+                if existing[0]["actor_id"] != user["accountId"]:
+                    self._send_json(409, {"success": False, "statusCode": 409, "errorCode": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key previously used by a different account.", "requestId": req_id})
+                    return
+                self._send_json(200, {
+                    "success": True,
+                    "statusCode": 200,
+                    "data": {
+                        "transactionId": existing[0]["transaction_id"],
+                        "idempotencyKey": existing[0]["idempotency_key"],
+                        "amount": int(existing[0]["amount"]),
+                        "sourceWalletId": existing[0]["source_wallet_id"],
+                        "destinationWalletId": existing[0]["destination_wallet_id"],
+                        "balanceAfterSource": int(existing[0]["balance_after_source"]) if existing[0].get("balance_after_source") is not None else None,
+                        "status": existing[0]["status"],
+                        "createdAt": int(existing[0]["created_at"])
+                    },
+                    "requestId": req_id
+                })
                 return
 
-            # Tenant isolation: Agents can ONLY transfer to their own subordinated users
-            if user["role"] == "AGENT":
-                target_user = pg_pool.execute(f"SELECT id, parent_id FROM accounts WHERE id = {escape_sql(dest_acc_id)};")
-                if not target_user or target_user[0]["parent_id"] != user["accountId"]:
-                    self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Agents can only transfer coins to their own subordinated users.", "requestId": req_id})
-                    return
-
             try:
-                pg_pool.execute("BEGIN;")
-                # Lock Source Wallet
-                src_w = pg_pool.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = {escape_sql(user['accountId'])} FOR UPDATE;")
-                if not src_w or int(src_w[0]["balance"]) < amount:
-                    pg_pool.execute("ROLLBACK;")
-                    self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Insufficient virtual coin balance.", "requestId": req_id})
-                    return
-
-                src_id = src_w[0]["wallet_id"]
-                src_bal = int(src_w[0]["balance"])
-
-                # Lock Destination Wallet
-                dest_w = pg_pool.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = {escape_sql(dest_acc_id)} FOR UPDATE;")
-                if not dest_w:
-                    pg_pool.execute("ROLLBACK;")
-                    self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "DESTINATION_NOT_FOUND", "message": "Destination wallet not found.", "requestId": req_id})
-                    return
-
-                dst_id = dest_w[0]["wallet_id"]
-                dst_bal = int(dest_w[0]["balance"])
-
-                now = int(time.time() * 1000)
-                new_src_bal = src_bal - amount
-                new_dst_bal = dst_bal + amount
                 tx_id = str(uuid.uuid4())
+                now = int(time.time() * 1000)
+                new_src_bal = 0
+                src_w_id = None
+                dst_w_id = None
 
-                pg_pool.execute(f"UPDATE wallets SET balance = {new_src_bal}, updated_at = {now} WHERE wallet_id = '{src_id}';")
-                pg_pool.execute(f"UPDATE wallets SET balance = {new_dst_bal}, updated_at = {now} WHERE wallet_id = '{dst_id}';")
+                with pg_pool.transaction() as conn:
+                    # Tenant isolation check inside transaction to prevent TOCTOU
+                    if user["role"] == "AGENT":
+                        target_user = conn.execute(f"SELECT id, role, parent_id FROM accounts WHERE id = {escape_sql(dest_acc_id)};")
+                        if not target_user or target_user[0]["parent_id"] != user["accountId"] or target_user[0]["role"] != "USER":
+                            self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Agents can only transfer coins to their own subordinated users.", "requestId": req_id})
+                            return
 
-                tx_type = "ADMIN_TO_AGENT" if user["role"] == "ADMIN" else "AGENT_TO_USER"
-                pg_pool.execute(f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, source_wallet_id, destination_wallet_id, amount, balance_before_source, balance_after_source, balance_before_destination, balance_after_destination, transaction_type, reason, status, created_at) VALUES ('{tx_id}', {escape_sql(idempotency_key)}, {now}, '{user['accountId']}', '{user['role']}', '{src_id}', '{dst_id}', {amount}, {src_bal}, {new_src_bal}, {dst_bal}, {new_dst_bal}, '{tx_type}', {escape_sql(reason)}, 'COMPLETED', {now});")
-                pg_pool.execute("COMMIT;")
+                    # Query wallet IDs for source and destination
+                    w_info = conn.execute(f"SELECT wallet_id, owner_id FROM wallets WHERE owner_id IN ({escape_sql(user['accountId'])}, {escape_sql(dest_acc_id)});")
+                    for w in w_info:
+                        if w["owner_id"] == user["accountId"]:
+                            src_w_id = w["wallet_id"]
+                        elif w["owner_id"] == dest_acc_id:
+                            dst_w_id = w["wallet_id"]
+
+                    if not src_w_id:
+                        self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "WALLET_NOT_FOUND", "message": "Source wallet not found.", "requestId": req_id})
+                        return
+                    if not dst_w_id:
+                        self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "DESTINATION_NOT_FOUND", "message": "Destination wallet not found.", "requestId": req_id})
+                        return
+
+                    if src_w_id == dst_w_id:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_TRANSFER", "message": "Cannot transfer coins to the same wallet.", "requestId": req_id})
+                        return
+
+                    # Consistent row-locking order by wallet_id to prevent database deadlocks
+                    ordered_ids = sorted([src_w_id, dst_w_id])
+                    locked_wallets = conn.execute(f"SELECT wallet_id, owner_id, balance FROM wallets WHERE wallet_id IN ('{ordered_ids[0]}', '{ordered_ids[1]}') ORDER BY wallet_id FOR UPDATE;")
+                    w_map = {w["wallet_id"]: w for w in locked_wallets}
+
+                    src_w = w_map.get(src_w_id)
+                    dest_w = w_map.get(dst_w_id)
+
+                    src_bal = int(src_w["balance"])
+                    if src_bal < amount:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Insufficient virtual coin balance.", "requestId": req_id})
+                        return
+
+                    dst_bal = int(dest_w["balance"])
+                    new_src_bal = src_bal - amount
+                    new_dst_bal = dst_bal + amount
+
+                    conn.execute(f"UPDATE wallets SET balance = {new_src_bal}, updated_at = {now} WHERE wallet_id = '{src_w_id}';")
+                    conn.execute(f"UPDATE wallets SET balance = {new_dst_bal}, updated_at = {now} WHERE wallet_id = '{dst_w_id}';")
+
+                    tx_type = "ADMIN_TO_AGENT" if user["role"] == "ADMIN" else "AGENT_TO_USER"
+                    conn.execute(
+                        f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, "
+                        f"source_wallet_id, destination_wallet_id, amount, balance_before_source, balance_after_source, "
+                        f"balance_before_destination, balance_after_destination, transaction_type, reason, status, created_at) "
+                        f"VALUES ('{tx_id}', {escape_sql(idempotency_key)}, {now}, '{user['accountId']}', '{user['role']}', "
+                        f"'{src_w_id}', '{dst_w_id}', {amount}, {src_bal}, {new_src_bal}, {dst_bal}, {new_dst_bal}, "
+                        f"'{tx_type}', {escape_sql(reason)}, 'COMPLETED', {now});"
+                    )
 
                 log_audit(user["accountId"], user["role"], "COIN_TRANSFER", tx_id, "TRANSACTION", req_id, {"amount": amount, "dest": dest_acc_id})
                 create_notification(dest_acc_id, "USER", "WALLET_CREDIT", "Virtual Coins Received", f"You received {amount} virtual coins.", "INFO", "TRANSACTION", tx_id)
@@ -787,8 +892,8 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                         "transactionId": tx_id,
                         "idempotencyKey": idempotency_key,
                         "amount": amount,
-                        "sourceWalletId": src_id,
-                        "destinationWalletId": dst_id,
+                        "sourceWalletId": src_w_id,
+                        "destinationWalletId": dst_w_id,
                         "balanceAfterSource": new_src_bal,
                         "status": "COMPLETED",
                         "createdAt": now
@@ -796,7 +901,6 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                     "requestId": req_id
                 })
             except Exception as e:
-                pg_pool.execute("ROLLBACK;")
                 self._send_json(500, {"success": False, "statusCode": 500, "message": str(e), "requestId": req_id})
             return
 
@@ -808,39 +912,106 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
             target_acc_id = data.get("targetAccountId")
             amount = int(data.get("amount", 0))
             reason = data.get("reason", "Adjustment")
-            idempotency_key = self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or str(uuid.uuid4())
+            idempotency_key = (self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or "").strip()
+
+            if not idempotency_key:
+                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "VALIDATION_ERROR", "message": "Idempotency-Key is required.", "requestId": req_id})
+                return
 
             if amount <= 0:
                 self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_AMOUNT", "message": "Amount must be greater than zero.", "requestId": req_id})
                 return
 
-            try:
-                pg_pool.execute("BEGIN;")
-                target_w = pg_pool.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = {escape_sql(target_acc_id)} FOR UPDATE;")
-                if not target_w or int(target_w[0]["balance"]) < amount:
-                    pg_pool.execute("ROLLBACK;")
-                    self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Target balance insufficient for deduction.", "requestId": req_id})
+            # Check existing idempotency
+            existing = pg_pool.execute(f"SELECT * FROM wallet_transactions WHERE idempotency_key = {escape_sql(idempotency_key)};")
+            if existing:
+                if existing[0]["actor_id"] != user["accountId"]:
+                    self._send_json(409, {"success": False, "statusCode": 409, "errorCode": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key previously used by a different account.", "requestId": req_id})
                     return
-                tw_id = target_w[0]["wallet_id"]
-                cur_bal = int(target_w[0]["balance"])
-                new_bal = cur_bal - amount
-                now = int(time.time() * 1000)
+                self._send_json(200, {
+                    "success": True,
+                    "statusCode": 200,
+                    "data": {
+                        "transactionId": existing[0]["transaction_id"],
+                        "idempotencyKey": existing[0]["idempotency_key"],
+                        "amount": int(existing[0]["amount"]),
+                        "sourceWalletId": existing[0]["source_wallet_id"],
+                        "balanceAfterSource": int(existing[0]["balance_after_source"]) if existing[0].get("balance_after_source") is not None else None,
+                        "status": existing[0]["status"],
+                        "createdAt": int(existing[0]["created_at"])
+                    },
+                    "requestId": req_id
+                })
+                return
+
+            try:
                 tx_id = str(uuid.uuid4())
-                pg_pool.execute(f"UPDATE wallets SET balance = {new_bal}, updated_at = {now} WHERE wallet_id = '{tw_id}';")
-                pg_pool.execute(f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, source_wallet_id, amount, balance_before_source, balance_after_source, transaction_type, reason, status, created_at) VALUES ('{tx_id}', {escape_sql(idempotency_key)}, {now}, '{user['accountId']}', '{user['role']}', '{tw_id}', {amount}, {cur_bal}, {new_bal}, 'DEDUCTION', {escape_sql(reason)}, 'COMPLETED', {now});")
-                pg_pool.execute("COMMIT;")
-                self._send_json(200, {"success": True, "statusCode": 200, "data": {"transactionId": tx_id, "newBalance": new_bal}, "requestId": req_id})
+                now = int(time.time() * 1000)
+                new_bal = 0
+                tw_id = None
+
+                with pg_pool.transaction() as conn:
+                    # Tenant isolation check: If Agent, verify target is their own subordinated USER
+                    if user["role"] == "AGENT":
+                        target_user = conn.execute(f"SELECT id, role, parent_id FROM accounts WHERE id = {escape_sql(target_acc_id)};")
+                        if not target_user or target_user[0]["parent_id"] != user["accountId"] or target_user[0]["role"] != "USER":
+                            self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Agents can only deduct coins from their own subordinated users.", "requestId": req_id})
+                            return
+
+                    target_w = conn.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = {escape_sql(target_acc_id)} FOR UPDATE;")
+                    if not target_w:
+                        self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "WALLET_NOT_FOUND", "message": "Target wallet not found.", "requestId": req_id})
+                        return
+
+                    tw_id = target_w[0]["wallet_id"]
+                    cur_bal = int(target_w[0]["balance"])
+                    if cur_bal < amount:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Target balance insufficient for deduction.", "requestId": req_id})
+                        return
+
+                    new_bal = cur_bal - amount
+
+                    conn.execute(f"UPDATE wallets SET balance = {new_bal}, updated_at = {now} WHERE wallet_id = '{tw_id}';")
+                    conn.execute(
+                        f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, "
+                        f"source_wallet_id, amount, balance_before_source, balance_after_source, transaction_type, reason, status, created_at) "
+                        f"VALUES ('{tx_id}', {escape_sql(idempotency_key)}, {now}, '{user['accountId']}', '{user['role']}', "
+                        f"'{tw_id}', {amount}, {cur_bal}, {new_bal}, 'DEDUCTION', {escape_sql(reason)}, 'COMPLETED', {now});"
+                    )
+
+                log_audit(user["accountId"], user["role"], "COIN_DEDUCTION", tx_id, "TRANSACTION", req_id, {"amount": amount, "target": target_acc_id})
+                self._send_json(200, {
+                    "success": True,
+                    "statusCode": 200,
+                    "data": {
+                        "transactionId": tx_id,
+                        "idempotencyKey": idempotency_key,
+                        "amount": amount,
+                        "sourceWalletId": tw_id,
+                        "balanceAfterSource": new_bal,
+                        "status": "COMPLETED",
+                        "createdAt": now
+                    },
+                    "requestId": req_id
+                })
             except Exception as e:
-                pg_pool.execute("ROLLBACK;")
                 self._send_json(500, {"success": False, "statusCode": 500, "message": str(e), "requestId": req_id})
             return
 
         # Game Entry
         if path in ("/v1/games/enter", "/games/enter"):
+            if user["role"] != "USER":
+                self._send_json(403, {"success": False, "statusCode": 403, "errorCode": "FORBIDDEN", "message": "Only regular users can enter contests.", "requestId": req_id})
+                return
+
             game_id = data.get("gameId")
             option_id = data.get("optionId")
             amount = int(data.get("amount", 0))
-            idempotency_key = self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or str(uuid.uuid4())
+            idempotency_key = (self.headers.get("Idempotency-Key") or data.get("idempotencyKey") or "").strip()
+
+            if not idempotency_key:
+                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "VALIDATION_ERROR", "message": "Idempotency-Key is required.", "requestId": req_id})
+                return
 
             if amount <= 0:
                 self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_AMOUNT", "message": "Amount must be greater than zero.", "requestId": req_id})
@@ -849,40 +1020,59 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
             # Check existing entry idempotency
             existing_entry = pg_pool.execute(f"SELECT * FROM game_entries WHERE idempotency_key = {escape_sql(idempotency_key)};")
             if existing_entry:
+                if existing_entry[0]["user_id"] != user["accountId"]:
+                    self._send_json(409, {"success": False, "statusCode": 409, "errorCode": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key previously used by a different user.", "requestId": req_id})
+                    return
                 self._send_json(200, {"success": True, "statusCode": 200, "data": existing_entry[0], "requestId": req_id})
                 return
 
-            game_rows = pg_pool.execute(f"SELECT * FROM games WHERE game_id = {escape_sql(game_id)};")
-            if not game_rows:
-                self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "GAME_NOT_FOUND", "message": "Game not found.", "requestId": req_id})
-                return
-            g = game_rows[0]
-            now = int(time.time() * 1000)
-            if g["status"] not in ("SCHEDULED", "ACTIVE") or now > int(g["entry_deadline"]):
-                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "GAME_CLOSED", "message": "Game is not accepting entries.", "requestId": req_id})
-                return
-            if amount < int(g["min_coins"]) or amount > int(g["max_coins"]):
-                self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_COIN_AMOUNT", "message": f"Coins must be between {g['min_coins']} and {g['max_coins']}.", "requestId": req_id})
-                return
-
             try:
-                pg_pool.execute("BEGIN;")
-                uw = pg_pool.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = '{user['accountId']}' FOR UPDATE;")
-                if not uw or int(uw[0]["balance"]) < amount:
-                    pg_pool.execute("ROLLBACK;")
-                    self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Insufficient coins to enter game.", "requestId": req_id})
-                    return
-                u_wid = uw[0]["wallet_id"]
-                u_bal = int(uw[0]["balance"])
-                new_u_bal = u_bal - amount
-
                 entry_id = str(uuid.uuid4())
                 tx_id = str(uuid.uuid4())
+                now = int(time.time() * 1000)
+                new_u_bal = 0
 
-                pg_pool.execute(f"UPDATE wallets SET balance = {new_u_bal}, updated_at = {now} WHERE wallet_id = '{u_wid}';")
-                pg_pool.execute(f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, source_wallet_id, amount, balance_before_source, balance_after_source, transaction_type, reason, reference_id, status, created_at) VALUES ('{tx_id}', '{idempotency_key}_tx', {now}, '{user['accountId']}', '{user['role']}', '{u_wid}', {amount}, {u_bal}, {new_u_bal}, 'GAME_ENTRY', 'Virtual Game Entry Fee', '{entry_id}', 'COMPLETED', {now});")
-                pg_pool.execute(f"INSERT INTO game_entries (entry_id, game_id, user_id, selected_option_id, virtual_coin_amount, status, idempotency_key, deduction_transaction_id, created_at, updated_at) VALUES ('{entry_id}', '{game_id}', '{user['accountId']}', {escape_sql(option_id)}, {amount}, 'CONFIRMED', {escape_sql(idempotency_key)}, '{tx_id}', {now}, {now});")
-                pg_pool.execute("COMMIT;")
+                with pg_pool.transaction() as conn:
+                    game_rows = conn.execute(f"SELECT * FROM games WHERE game_id = {escape_sql(game_id)};")
+                    if not game_rows:
+                        self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "GAME_NOT_FOUND", "message": "Game not found.", "requestId": req_id})
+                        return
+
+                    g = game_rows[0]
+                    if g["status"] not in ("SCHEDULED", "ACTIVE") or now > int(g["entry_deadline"]):
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "GAME_CLOSED", "message": "Game entry deadline has passed or contest is closed.", "requestId": req_id})
+                        return
+
+                    if amount < int(g["min_coins"]) or amount > int(g["max_coins"]):
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_COIN_AMOUNT", "message": f"Coins must be between {g['min_coins']} and {g['max_coins']}.", "requestId": req_id})
+                        return
+
+                    # Verify option exists and strictly belongs to this game
+                    opt_rows = conn.execute(f"SELECT option_id FROM game_options WHERE option_id = {escape_sql(option_id)} AND game_id = {escape_sql(game_id)};")
+                    if not opt_rows:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_GAME_OPTION", "message": "Selected option does not belong to the specified game or does not exist.", "requestId": req_id})
+                        return
+
+                    uw = conn.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = '{user['accountId']}' FOR UPDATE;")
+                    if not uw or int(uw[0]["balance"]) < amount:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INSUFFICIENT_BALANCE", "message": "Insufficient coins to enter game.", "requestId": req_id})
+                        return
+
+                    u_wid = uw[0]["wallet_id"]
+                    u_bal = int(uw[0]["balance"])
+                    new_u_bal = u_bal - amount
+
+                    conn.execute(f"UPDATE wallets SET balance = {new_u_bal}, updated_at = {now} WHERE wallet_id = '{u_wid}';")
+                    conn.execute(
+                        f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, "
+                        f"source_wallet_id, amount, balance_before_source, balance_after_source, transaction_type, reason, reference_id, status, created_at) "
+                        f"VALUES ('{tx_id}', '{idempotency_key}_tx', {now}, '{user['accountId']}', '{user['role']}', "
+                        f"'{u_wid}', {amount}, {u_bal}, {new_u_bal}, 'GAME_ENTRY', 'Virtual Game Entry Fee', '{entry_id}', 'COMPLETED', {now});"
+                    )
+                    conn.execute(
+                        f"INSERT INTO game_entries (entry_id, game_id, user_id, selected_option_id, virtual_coin_amount, status, idempotency_key, deduction_transaction_id, created_at, updated_at) "
+                        f"VALUES ('{entry_id}', '{game_id}', '{user['accountId']}', {escape_sql(option_id)}, {amount}, 'CONFIRMED', {escape_sql(idempotency_key)}, '{tx_id}', {now}, {now});"
+                    )
 
                 self._send_json(200, {
                     "success": True,
@@ -897,7 +1087,6 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
                     "requestId": req_id
                 })
             except Exception as e:
-                pg_pool.execute("ROLLBACK;")
                 self._send_json(500, {"success": False, "statusCode": 500, "message": str(e), "requestId": req_id})
             return
 
@@ -934,31 +1123,82 @@ class MahakalApiHandler(BaseHTTPRequestHandler):
             now = int(time.time() * 1000)
 
             try:
-                pg_pool.execute("BEGIN;")
-                pg_pool.execute(f"UPDATE games SET status = 'COMPLETED', updated_at = {now} WHERE game_id = '{game_id}';")
-                rid = str(uuid.uuid4())
-                pg_pool.execute(f"INSERT INTO game_results (result_id, game_id, winning_option_id, finalized_by, finalized_at) VALUES ('{rid}', '{game_id}', '{winning_opt_id}', '{user['accountId']}', {now}) ON CONFLICT DO NOTHING;")
+                with pg_pool.transaction() as conn:
+                    # Lock the game row with FOR UPDATE to serialize concurrent finalization attempts
+                    g_rows = conn.execute(f"SELECT game_id, status, reward_multiplier FROM games WHERE game_id = {escape_sql(game_id)} FOR UPDATE;")
+                    if not g_rows:
+                        self._send_json(404, {"success": False, "statusCode": 404, "errorCode": "GAME_NOT_FOUND", "message": "Game not found.", "requestId": req_id})
+                        return
 
-                # Credit winning entries
-                winning_entries = pg_pool.execute(f"SELECT * FROM game_entries WHERE game_id = '{game_id}' AND selected_option_id = '{winning_opt_id}';")
-                g_row = pg_pool.execute(f"SELECT reward_multiplier FROM games WHERE game_id = '{game_id}';")[0]
-                mult = float(g_row.get("reward_multiplier") or 2.0)
+                    g_row = g_rows[0]
+                    # If game is already COMPLETED or SETTLED, safely return existing result without duplicate credits
+                    if g_row["status"] in ("COMPLETED", "SETTLED"):
+                        existing_res = conn.execute(f"SELECT * FROM game_results WHERE game_id = {escape_sql(game_id)};")
+                        winners_cnt = conn.execute(f"SELECT count(*) as cnt FROM game_entries WHERE game_id = {escape_sql(game_id)} AND status = 'WON';")
+                        self._send_json(200, {
+                            "success": True,
+                            "statusCode": 200,
+                            "data": {
+                                "gameId": game_id,
+                                "winningOptionId": existing_res[0]["winning_option_id"] if existing_res else winning_opt_id,
+                                "winnersCount": int(winners_cnt[0]["cnt"] if winners_cnt else 0),
+                                "alreadyFinalized": True
+                            },
+                            "requestId": req_id
+                        })
+                        return
 
-                for we in winning_entries:
-                    reward = int(int(we["virtual_coin_amount"]) * mult)
-                    w_row = pg_pool.execute(f"SELECT wallet_id, balance FROM wallets WHERE owner_id = '{we['user_id']}' FOR UPDATE;")[0]
-                    curr_bal = int(w_row["balance"])
-                    new_bal = curr_bal + reward
-                    tx_id = str(uuid.uuid4())
-                    pg_pool.execute(f"UPDATE wallets SET balance = {new_bal}, updated_at = {now} WHERE wallet_id = '{w_row['wallet_id']}';")
-                    pg_pool.execute(f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, destination_wallet_id, amount, balance_before_destination, balance_after_destination, transaction_type, reason, reference_id, status, created_at) VALUES ('{tx_id}', '{we['entry_id']}_win', {now}, '{user['accountId']}', 'SYSTEM', '{w_row['wallet_id']}', {reward}, {curr_bal}, {new_bal}, 'GAME_REWARD', 'Game Victory Reward', '{we['entry_id']}', 'COMPLETED', {now});")
-                    pg_pool.execute(f"UPDATE game_entries SET status = 'WON', reward_amount = {reward}, reward_transaction_id = '{tx_id}', updated_at = {now} WHERE entry_id = '{we['entry_id']}';")
+                    # Verify that the winning option belongs to this game
+                    opt_rows = conn.execute(f"SELECT option_id FROM game_options WHERE option_id = {escape_sql(winning_opt_id)} AND game_id = {escape_sql(game_id)};")
+                    if not opt_rows:
+                        self._send_json(422, {"success": False, "statusCode": 422, "errorCode": "INVALID_OPTION", "message": "Winning option does not belong to this game or does not exist.", "requestId": req_id})
+                        return
 
-                pg_pool.execute("COMMIT;")
+                    # Mark game COMPLETED
+                    conn.execute(f"UPDATE games SET status = 'COMPLETED', updated_at = {now} WHERE game_id = '{game_id}';")
+                    rid = str(uuid.uuid4())
+                    conn.execute(f"INSERT INTO game_results (result_id, game_id, winning_option_id, finalized_by, finalized_at) VALUES ('{rid}', '{game_id}', '{winning_opt_id}', '{user['accountId']}', {now});")
+
+                    # Lock all entries for this game
+                    entries = conn.execute(f"SELECT entry_id, user_id, selected_option_id, virtual_coin_amount, status FROM game_entries WHERE game_id = {escape_sql(game_id)} FOR UPDATE;")
+                    mult = float(g_row.get("reward_multiplier") or 2.0)
+
+                    winning_entries = [e for e in entries if e["selected_option_id"] == winning_opt_id and e["status"] == "CONFIRMED"]
+                    losing_entries = [e for e in entries if e["selected_option_id"] != winning_opt_id and e["status"] == "CONFIRMED"]
+
+                    if winning_entries:
+                        # Fetch and lock all unique winner wallets in sorted order to prevent deadlocks
+                        winner_user_ids = sorted(list(set(e["user_id"] for e in winning_entries)))
+                        winner_wallets = conn.execute(f"SELECT wallet_id, owner_id, balance FROM wallets WHERE owner_id IN ({','.join(escape_sql(uid) for uid in winner_user_ids)}) ORDER BY wallet_id FOR UPDATE;")
+                        wallet_by_owner = {w["owner_id"]: {"wallet_id": w["wallet_id"], "balance": int(w["balance"])} for w in winner_wallets}
+
+                        for we in winning_entries:
+                            w_data = wallet_by_owner.get(we["user_id"])
+                            if not w_data:
+                                continue
+                            reward = int(int(we["virtual_coin_amount"]) * mult)
+                            curr_bal = w_data["balance"]
+                            new_bal = curr_bal + reward
+                            w_data["balance"] = new_bal
+                            tx_id = str(uuid.uuid4())
+
+                            conn.execute(f"UPDATE wallets SET balance = {new_bal}, updated_at = {now} WHERE wallet_id = '{w_data['wallet_id']}';")
+                            conn.execute(
+                                f"INSERT INTO wallet_transactions (transaction_id, idempotency_key, timestamp, actor_id, actor_role, "
+                                f"destination_wallet_id, amount, balance_before_destination, balance_after_destination, "
+                                f"transaction_type, reason, reference_id, status, created_at) "
+                                f"VALUES ('{tx_id}', '{we['entry_id']}_win', {now}, '{user['accountId']}', 'SYSTEM', "
+                                f"'{w_data['wallet_id']}', {reward}, {curr_bal}, {new_bal}, 'GAME_REWARD', 'Game Victory Reward', '{we['entry_id']}', 'COMPLETED', {now});"
+                            )
+                            conn.execute(f"UPDATE game_entries SET status = 'WON', reward_amount = {reward}, reward_transaction_id = '{tx_id}', updated_at = {now} WHERE entry_id = '{we['entry_id']}';")
+
+                    # Mark losing entries as LOST terminal status
+                    for le in losing_entries:
+                        conn.execute(f"UPDATE game_entries SET status = 'LOST', updated_at = {now} WHERE entry_id = '{le['entry_id']}';")
+
                 log_audit(user["accountId"], user["role"], "GAME_FINALIZED", game_id, "GAME", req_id)
                 self._send_json(200, {"success": True, "statusCode": 200, "data": {"gameId": game_id, "winningOptionId": winning_opt_id, "winnersCount": len(winning_entries)}, "requestId": req_id})
             except Exception as e:
-                pg_pool.execute("ROLLBACK;")
                 self._send_json(500, {"success": False, "statusCode": 500, "message": str(e), "requestId": req_id})
             return
 
