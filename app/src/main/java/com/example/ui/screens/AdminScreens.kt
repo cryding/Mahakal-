@@ -26,11 +26,13 @@ import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Security
@@ -48,6 +50,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -94,19 +97,31 @@ import java.text.NumberFormat
 import java.util.Locale
 
 @Composable
-fun AdminDashboardView(
+fun AdminDashboardScreen(
     admin: UserEntity,
-    viewModel: MahakalViewModel,
-    agents: List<UserEntity>,
-    users: List<UserEntity>,
-    games: List<GameEntity>
+    viewModel: MahakalViewModel
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("OVERVIEW", "AGENTS", "USERS", "GAMES", "ANALYTICS", "COIN MGMT", "REPORTS", "SETTINGS")
-
+    val agents by viewModel.allAgents.collectAsState()
+    val users by viewModel.allUsers.collectAsState()
+    val games by viewModel.allGames.collectAsState()
     val transactions by viewModel.allTransactions.collectAsState()
+    val auditLogs by viewModel.allAuditLogs.collectAsState()
     val reconciliationReport by viewModel.reconciliationReport.collectAsState()
     val securityDashboard by viewModel.securityDashboard.collectAsState()
+
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabTitles = listOf(
+        "1. Dashboard",
+        "2. Agents",
+        "3. Users",
+        "4. Coin Mgmt",
+        "5. Transactions",
+        "6. Games",
+        "7. Analytics",
+        "8. Audit Logs",
+        "9. Settings",
+        "10. Profile"
+    )
 
     var showMintDialog by remember { mutableStateOf(false) }
     var showCreateAgentDialog by remember { mutableStateOf(false) }
@@ -119,105 +134,174 @@ fun AdminDashboardView(
     var showConfigApiDialog by remember { mutableStateOf<GameEntity?>(null) }
     var showDeclareResultDialog by remember { mutableStateOf<GameEntity?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        BalanceCard(
-            user = admin,
-            onMintCoins = { showMintDialog = true },
-            onTransferCoins = {
-                if (agents.isNotEmpty()) {
-                    showTransferDialog = agents.first()
-                }
-            }
-        )
-
-        // Scrollable Tab Navigation across all 8 Admin modules
-        ScrollableTabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = DarkBackground,
-            contentColor = GoldPrimary,
-            edgePadding = 12.dp,
-            indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = GoldPrimary,
-                    height = 3.dp
-                )
-            }
-        ) {
-            tabTitles.forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index },
-                    text = {
+    Scaffold(
+        topBar = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkSurface)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(GoldPrimary.copy(alpha = 0.2f))
+                            .border(1.5.dp, GoldPrimary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
                         Text(
-                            text = title,
-                            fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = if (selectedTab == index) GoldPrimary else TextSecondary
+                            text = "MAHAKAL ADMIN DASHBOARD",
+                            fontWeight = FontWeight.Black,
+                            color = GoldPrimary,
+                            fontSize = 15.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = "ROOT CONTROL CENTER • @${admin.username}",
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { viewModel.syncFromBackend("ADMIN") },
+                        modifier = Modifier.testTag("admin_sync_button")
+                    ) {
+                        Icon(Icons.Default.CloudSync, contentDescription = "Sync", tint = GoldPrimary)
+                    }
+                    IconButton(
+                        onClick = { viewModel.logout() },
+                        modifier = Modifier.testTag("admin_header_logout_button")
+                    ) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Logout", tint = CrimsonRed)
+                    }
+                }
+            }
+        },
+        containerColor = DarkBackground
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            BalanceCard(
+                user = admin,
+                onMintCoins = { showMintDialog = true },
+                onTransferCoins = {
+                    if (agents.isNotEmpty()) {
+                        showTransferDialog = agents.first()
+                    }
+                }
+            )
+
+            // Scrollable Tab Navigation across all 10 Admin modules
+            ScrollableTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = DarkBackground,
+                contentColor = GoldPrimary,
+                edgePadding = 12.dp,
+                indicator = { tabPositions ->
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = GoldPrimary,
+                        height = 3.dp
+                    )
+                }
+            ) {
+                tabTitles.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = {
+                            Text(
+                                text = title,
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 12.sp,
+                                color = if (selectedTab == index) GoldPrimary else TextSecondary
+                            )
+                        }
+                    )
+                }
+            }
+
+            when (selectedTab) {
+                0 -> AdminOverviewTab(
+                    admin = admin,
+                    agentCount = agents.size,
+                    userCount = users.size,
+                    totalCirculating = admin.balance + agents.sumOf { it.balance } + users.sumOf { it.balance },
+                    onNavigate = { selectedTab = it }
+                )
+                1 -> AdminAgentsList(
+                    agents = agents,
+                    onAddAgent = { showCreateAgentDialog = true },
+                    onTransferCoins = { showTransferDialog = it },
+                    onDeductCoins = { showDeductDialog = it },
+                    onToggleStatus = { agent -> viewModel.toggleAgentStatus(agent) },
+                    onViewDetails = { showUserDetailsDialog = it }
+                )
+                2 -> AdminUsersList(
+                    users = users,
+                    onTransferCoins = { showTransferDialog = it },
+                    onDeductCoins = { showDeductDialog = it },
+                    onToggleStatus = { user ->
+                        val newSt = if (user.status == "ACTIVE") "DISABLED" else "ACTIVE"
+                        viewModel.toggleUserStatus(user.id, newSt)
+                    },
+                    onViewDetails = { showUserDetailsDialog = it }
+                )
+                3 -> AdminCoinsTab(
+                    admin = admin,
+                    agents = agents,
+                    users = users,
+                    onMintCoins = { showMintDialog = true },
+                    onTransferCoins = { if (agents.isNotEmpty()) showTransferDialog = agents.first() },
+                    onDeductCoins = { if (agents.isNotEmpty()) showDeductDialog = agents.first() }
+                )
+                4 -> AdminTransactionsTab(
+                    transactions = transactions
+                )
+                5 -> AdminGamesList(
+                    games = games,
+                    onCreateGame = { showCreateGameDialog = true },
+                    onEditGame = { showEditGameDialog = it },
+                    onToggleStatus = { game ->
+                        val newSt = if (game.status == "OPEN") "CLOSED" else "OPEN"
+                        viewModel.toggleGameStatus(game.id, newSt)
+                    },
+                    onConfigApi = { showConfigApiDialog = it },
+                    onDeclareResult = { showDeclareResultDialog = it }
+                )
+                6 -> AdminGameAnalyticsTab(
+                    games = games,
+                    transactions = transactions
+                )
+                7 -> AdminAuditLogsTab(
+                    logs = auditLogs
+                )
+                8 -> AdminReportsTab(
+                    reconciliationReport = reconciliationReport,
+                    securityDashboard = securityDashboard,
+                    onRefresh = { viewModel.syncFromBackend("ADMIN") }
+                )
+                9 -> AdminProfileTab(
+                    admin = admin,
+                    onLogout = { viewModel.logout() },
+                    onChangePassword = { showChangePasswordDialog = true },
+                    onSyncServer = { viewModel.syncFromBackend("ADMIN") }
                 )
             }
-        }
-
-        when (selectedTab) {
-            0 -> AdminOverviewTab(
-                admin = admin,
-                agentCount = agents.size,
-                userCount = users.size,
-                totalCirculating = admin.balance + agents.sumOf { it.balance } + users.sumOf { it.balance }
-            )
-            1 -> AdminAgentsList(
-                agents = agents,
-                onAddAgent = { showCreateAgentDialog = true },
-                onTransferCoins = { showTransferDialog = it },
-                onDeductCoins = { showDeductDialog = it },
-                onToggleStatus = { agent -> viewModel.toggleAgentStatus(agent) },
-                onViewDetails = { showUserDetailsDialog = it }
-            )
-            2 -> AdminUsersList(
-                users = users,
-                onTransferCoins = { showTransferDialog = it },
-                onDeductCoins = { showDeductDialog = it },
-                onToggleStatus = { user ->
-                    val newSt = if (user.status == "ACTIVE") "DISABLED" else "ACTIVE"
-                    viewModel.toggleUserStatus(user.id, newSt)
-                },
-                onViewDetails = { showUserDetailsDialog = it }
-            )
-            3 -> AdminGamesList(
-                games = games,
-                onCreateGame = { showCreateGameDialog = true },
-                onEditGame = { showEditGameDialog = it },
-                onToggleStatus = { game ->
-                    val newSt = if (game.status == "OPEN") "CLOSED" else "OPEN"
-                    viewModel.toggleGameStatus(game.id, newSt)
-                },
-                onConfigApi = { showConfigApiDialog = it },
-                onDeclareResult = { showDeclareResultDialog = it }
-            )
-            4 -> AdminGameAnalyticsTab(
-                games = games,
-                transactions = transactions
-            )
-            5 -> AdminCoinsTab(
-                admin = admin,
-                agents = agents,
-                users = users,
-                onMintCoins = { showMintDialog = true },
-                onTransferCoins = { if (agents.isNotEmpty()) showTransferDialog = agents.first() },
-                onDeductCoins = { if (agents.isNotEmpty()) showDeductDialog = agents.first() }
-            )
-            6 -> AdminReportsTab(
-                reconciliationReport = reconciliationReport,
-                securityDashboard = securityDashboard,
-                onRefresh = { viewModel.syncFromBackend("ADMIN") }
-            )
-            7 -> AdminSettingsTab(
-                admin = admin,
-                onChangePassword = { showChangePasswordDialog = true },
-                onSyncServer = { viewModel.syncFromBackend("ADMIN") }
-            )
         }
     }
 
@@ -866,6 +950,17 @@ fun AdminDashboardView(
 }
 
 @Composable
+fun AdminDashboardView(
+    admin: UserEntity,
+    viewModel: MahakalViewModel,
+    agents: List<UserEntity> = emptyList(),
+    users: List<UserEntity> = emptyList(),
+    games: List<GameEntity> = emptyList()
+) {
+    AdminDashboardScreen(admin = admin, viewModel = viewModel)
+}
+
+@Composable
 fun AdminAgentsList(
     agents: List<UserEntity>,
     onAddAgent: () -> Unit,
@@ -1174,7 +1269,8 @@ fun AdminOverviewTab(
     admin: UserEntity,
     agentCount: Int,
     userCount: Int,
-    totalCirculating: Long
+    totalCirculating: Long,
+    onNavigate: (Int) -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -1216,6 +1312,107 @@ fun AdminOverviewTab(
                     value = "$userCount",
                     modifier = Modifier.weight(1f)
                 )
+            }
+        }
+
+        item {
+            Text(
+                text = "ADMINISTRATIVE CONTROL MODULES",
+                style = MaterialTheme.typography.titleSmall,
+                color = GoldPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onNavigate(1) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = GoldPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_agents")
+                ) {
+                    Text("AGENTS ($agentCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { onNavigate(2) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = GoldPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_users")
+                ) {
+                    Text("USERS ($userCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onNavigate(3) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = GoldLight),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_coins")
+                ) {
+                    Text("COIN MGMT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { onNavigate(4) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = GoldLight),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_txs")
+                ) {
+                    Text("TRANSACTIONS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onNavigate(5) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = TextPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_games")
+                ) {
+                    Text("GAMES", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { onNavigate(6) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = TextPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_analytics")
+                ) {
+                    Text("ANALYTICS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onNavigate(7) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = TextSecondary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_audit")
+                ) {
+                    Text("AUDIT LOGS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { onNavigate(8) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = TextSecondary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).testTag("quick_nav_settings")
+                ) {
+                    Text("SETTINGS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -1398,10 +1595,6 @@ fun AdminGameAnalyticsTab(
     games: List<GameEntity>,
     transactions: List<com.example.data.local.entity.TransactionEntity>
 ) {
-    val totalEntriesCount = transactions.count { it.type == "USER_GAME_ENTRY" }
-    val totalCoinsEntered = transactions.filter { it.type == "USER_GAME_ENTRY" }.sumOf { it.amount }
-    val totalCoinsWon = transactions.filter { it.type == "USER_GAME_WIN" }.sumOf { it.amount }
-
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1416,32 +1609,38 @@ fun AdminGameAnalyticsTab(
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard(
-                    title = "TOTAL ENTRIES",
-                    value = "$totalEntriesCount",
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "COINS ENTERED",
-                    value = NumberFormat.getNumberInstance(Locale.US).format(totalCoinsEntered),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard(
-                    title = "COINS PAID (WINS)",
-                    value = NumberFormat.getNumberInstance(Locale.US).format(totalCoinsWon),
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "ACTIVE CONTESTS",
-                    value = "${games.count { it.status == "OPEN" }}",
-                    modifier = Modifier.weight(1f)
-                )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CrimsonRed.copy(alpha = 0.12f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = CrimsonRed, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Analytics API not available",
+                            fontWeight = FontWeight.Bold,
+                            color = CrimsonRed,
+                            fontSize = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Missing Backend Endpoint: GET /v1/admin/games/analytics (or /v1/analytics/games)",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "The production backend does not currently provide a dedicated analytics aggregation service. Fake/mock analytics have been strictly prohibited. Displaying real server-defined contest configurations and active bounds below.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                }
             }
         }
 
@@ -1759,4 +1958,258 @@ fun UserDetailsDialog(
             }
         }
     )
+}
+
+@Composable
+fun AdminTransactionsTab(
+    transactions: List<com.example.data.local.entity.TransactionEntity>
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Text(
+                text = "FINANCIAL TRANSACTION LEDGER (${transactions.size})",
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldLight,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Double-entry cryptographic ledger synchronized from backend PostgreSQL",
+                color = TextSecondary,
+                fontSize = 11.sp
+            )
+        }
+
+        if (transactions.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text("No ledger transactions recorded yet.", color = TextSecondary, fontSize = 13.sp)
+                    }
+                }
+            }
+        } else {
+            items(transactions) { tx ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = tx.type,
+                                fontWeight = FontWeight.Bold,
+                                color = when (tx.type) {
+                                    "MINT" -> GoldPrimary
+                                    "TRANSFER" -> EmeraldGreen
+                                    "DEDUCT" -> CrimsonRed
+                                    "USER_GAME_WIN" -> EmeraldGreen
+                                    else -> Color.White
+                                },
+                                fontSize = 14.sp
+                            )
+                            Text("ID: ${tx.id.take(16)}...", color = TextSecondary, fontSize = 11.sp)
+                            if (tx.description.isNotBlank()) {
+                                Text("Note: ${tx.description}", color = TextMuted, fontSize = 11.sp)
+                            }
+                        }
+                        Text(
+                            text = "${if (tx.type == "DEDUCT") "-" else "+"}${NumberFormat.getNumberInstance(Locale.US).format(tx.amount)} COINS",
+                            fontWeight = FontWeight.Bold,
+                            color = if (tx.type == "DEDUCT") CrimsonRed else GoldPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminAuditLogsTab(
+    logs: List<com.example.data.local.entity.AuditLogEntity>
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Text(
+                text = "SECURITY & COMPLIANCE AUDIT LOGS (${logs.size})",
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldLight,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Authoritative audit trail from GET /v1/audit/logs",
+                color = TextSecondary,
+                fontSize = 11.sp
+            )
+        }
+
+        if (logs.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text("No audit log events recorded yet.", color = TextSecondary, fontSize = 13.sp)
+                    }
+                }
+            }
+        } else {
+            items(logs) { log ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(log.action, fontWeight = FontWeight.Bold, color = GoldLight, fontSize = 13.sp)
+                            Text(log.actorRole, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Actor: ${log.actorId.take(16)}... | Target: ${log.targetId.take(16)}...", color = TextSecondary, fontSize = 11.sp)
+                        if (log.details.isNotBlank()) {
+                            Text("Details: ${log.details}", color = TextMuted, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminProfileTab(
+    admin: UserEntity,
+    onLogout: () -> Unit,
+    onChangePassword: () -> Unit,
+    onSyncServer: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(GoldPrimary.copy(alpha = 0.2f))
+                            .border(2.dp, GoldPrimary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(32.dp))
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(admin.fullName, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.White)
+                    Text("@${admin.username}", color = GoldLight, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(GoldPrimary)
+                            .padding(horizontal = 10.dp, vertical = 3.dp)
+                    ) {
+                        Text("PLATFORM ROOT ADMINISTRATOR", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("AUTHORITATIVE CREDENTIALS", fontWeight = FontWeight.Bold, color = GoldLight, fontSize = 13.sp)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Account UUID", color = TextSecondary, fontSize = 12.sp)
+                        Text(admin.id.take(16) + "...", color = TextPrimary, fontSize = 11.sp)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Account Status", color = TextSecondary, fontSize = 12.sp)
+                        Text(admin.status, color = EmeraldGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Authoritative Backend", color = TextSecondary, fontSize = 12.sp)
+                        Text("PostgreSQL on Render", color = GoldPrimary, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onSyncServer,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = GoldPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("SYNC DATA", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onChangePassword,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceCard, contentColor = TextPrimary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("PASSWORD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = onLogout,
+                colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed, contentColor = Color.White),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("admin_logout_button")
+            ) {
+                Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("LOGOUT SECURELY", fontWeight = FontWeight.Black, fontSize = 14.sp)
+            }
+        }
+    }
 }

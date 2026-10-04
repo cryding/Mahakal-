@@ -105,88 +105,48 @@ fun MahakalApp(viewModel: MahakalViewModel) {
         LoginScreen(viewModel = viewModel)
     } else {
         val user = currentUser!!
-        val agents by viewModel.allAgents.collectAsState()
-        val allUsers by viewModel.allUsers.collectAsState()
-        val agentUsers by viewModel.agentUsers.collectAsState()
-        val allGames by viewModel.allGames.collectAsState()
-        val activeGames by viewModel.activeGames.collectAsState()
-        val userEntries by viewModel.userEntries.collectAsState()
-        val transactions by viewModel.userTransactions.collectAsState()
-        val auditLogs by viewModel.allAuditLogs.collectAsState()
-        val notifications by viewModel.userNotifications.collectAsState()
+        if (user.role == "ADMIN") {
+            com.example.ui.screens.AdminDashboardScreen(
+                admin = user,
+                viewModel = viewModel
+            )
+        } else {
+            val agents by viewModel.allAgents.collectAsState()
+            val allUsers by viewModel.allUsers.collectAsState()
+            val agentUsers by viewModel.agentUsers.collectAsState()
+            val allGames by viewModel.allGames.collectAsState()
+            val activeGames by viewModel.activeGames.collectAsState()
+            val userEntries by viewModel.userEntries.collectAsState()
+            val transactions by viewModel.userTransactions.collectAsState()
+            val auditLogs by viewModel.allAuditLogs.collectAsState()
+            val notifications by viewModel.userNotifications.collectAsState()
 
-        val unreadNotifs = notifications.count { !it.isRead }
+            val unreadNotifs = notifications.count { !it.isRead }
 
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = DarkBackground,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                AppHeader(
-                    currentUser = user,
-                    unreadCount = unreadNotifs,
-                    onOpenNotifications = { viewModel.setTab("NOTIFICATIONS") },
-                    onOpenProfile = { showProfileDialog = true }
-                )
-            },
-            bottomBar = {
-                NavigationBar(
-                    containerColor = DarkSurface,
-                    contentColor = GoldPrimary,
-                    tonalElevation = 8.dp
-                ) {
-                    NavigationBarItem(
-                        selected = activeTab == "HOME",
-                        onClick = { viewModel.setTab("HOME") },
-                        icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                        label = { Text("Home", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_home"),
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.Black,
-                            selectedTextColor = GoldPrimary,
-                            indicatorColor = GoldPrimary,
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextMuted
-                        )
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = DarkBackground,
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                topBar = {
+                    AppHeader(
+                        currentUser = user,
+                        unreadCount = unreadNotifs,
+                        onOpenNotifications = { viewModel.setTab("NOTIFICATIONS") },
+                        onOpenProfile = { showProfileDialog = true }
                     )
-
-                    NavigationBarItem(
-                        selected = activeTab == "ARENA",
-                        onClick = { viewModel.setTab("ARENA") },
-                        icon = { Icon(Icons.Default.Casino, contentDescription = "Arena") },
-                        label = { Text("Arena", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_arena"),
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.Black,
-                            selectedTextColor = GoldPrimary,
-                            indicatorColor = GoldPrimary,
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextMuted
-                        )
-                    )
-
-                    NavigationBarItem(
-                        selected = activeTab == "LEDGER",
-                        onClick = { viewModel.setTab("LEDGER") },
-                        icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Ledger") },
-                        label = { Text("Ledger", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_ledger"),
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.Black,
-                            selectedTextColor = GoldPrimary,
-                            indicatorColor = GoldPrimary,
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextMuted
-                        )
-                    )
-
-                    if (user.role == "ADMIN") {
+                },
+                bottomBar = {
+                    NavigationBar(
+                        containerColor = DarkSurface,
+                        contentColor = GoldPrimary,
+                        tonalElevation = 8.dp
+                    ) {
                         NavigationBarItem(
-                            selected = activeTab == "AUDIT",
-                            onClick = { viewModel.setTab("AUDIT") },
-                            icon = { Icon(Icons.Default.Security, contentDescription = "Audit") },
-                            label = { Text("Audit", fontSize = 11.sp) },
-                            modifier = Modifier.testTag("nav_audit"),
+                            selected = activeTab == "HOME",
+                            onClick = { viewModel.setTab("HOME") },
+                            icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                            label = { Text("Home", fontSize = 11.sp) },
+                            modifier = Modifier.testTag("nav_home"),
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Color.Black,
                                 selectedTextColor = GoldPrimary,
@@ -195,7 +155,37 @@ fun MahakalApp(viewModel: MahakalViewModel) {
                                 unselectedTextColor = TextMuted
                             )
                         )
-                    } else {
+
+                        NavigationBarItem(
+                            selected = activeTab == "ARENA",
+                            onClick = { viewModel.setTab("ARENA") },
+                            icon = { Icon(Icons.Default.Casino, contentDescription = "Arena") },
+                            label = { Text("Arena", fontSize = 11.sp) },
+                            modifier = Modifier.testTag("nav_arena"),
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color.Black,
+                                selectedTextColor = GoldPrimary,
+                                indicatorColor = GoldPrimary,
+                                unselectedIconColor = TextSecondary,
+                                unselectedTextColor = TextMuted
+                            )
+                        )
+
+                        NavigationBarItem(
+                            selected = activeTab == "LEDGER",
+                            onClick = { viewModel.setTab("LEDGER") },
+                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Ledger") },
+                            label = { Text("Ledger", fontSize = 11.sp) },
+                            modifier = Modifier.testTag("nav_ledger"),
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color.Black,
+                                selectedTextColor = GoldPrimary,
+                                indicatorColor = GoldPrimary,
+                                unselectedIconColor = TextSecondary,
+                                unselectedTextColor = TextMuted
+                            )
+                        )
+
                         NavigationBarItem(
                             selected = activeTab == "NOTIFICATIONS",
                             onClick = { viewModel.setTab("NOTIFICATIONS") },
@@ -212,64 +202,57 @@ fun MahakalApp(viewModel: MahakalViewModel) {
                         )
                     }
                 }
-            }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .background(DarkBackground)
-            ) {
-                when (activeTab) {
-                    "HOME" -> {
-                        when (user.role) {
-                            "ADMIN" -> AdminDashboardView(
-                                admin = user,
-                                viewModel = viewModel,
-                                agents = agents,
-                                users = allUsers,
-                                games = allGames
-                            )
-                            "AGENT" -> AgentDashboardView(
-                                agent = user,
-                                viewModel = viewModel,
-                                downlineUsers = agentUsers
-                            )
-                            else -> UserDashboardView(
-                                user = user,
-                                viewModel = viewModel,
-                                activeGames = activeGames,
-                                userEntries = userEntries,
-                                onNavigateToArena = { viewModel.setTab("ARENA") }
-                            )
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(DarkBackground)
+                ) {
+                    when (activeTab) {
+                        "HOME" -> {
+                            when (user.role) {
+                                "AGENT" -> AgentDashboardView(
+                                    agent = user,
+                                    viewModel = viewModel,
+                                    downlineUsers = agentUsers
+                                )
+                                else -> UserDashboardView(
+                                    user = user,
+                                    viewModel = viewModel,
+                                    activeGames = activeGames,
+                                    userEntries = userEntries,
+                                    onNavigateToArena = { viewModel.setTab("ARENA") }
+                                )
+                            }
                         }
+                        "ARENA" -> GameArenaView(
+                            currentUser = user,
+                            viewModel = viewModel,
+                            games = activeGames
+                        )
+                        "LEDGER" -> LedgerView(
+                            transactions = transactions,
+                            currentUserId = user.id
+                        )
+                        "AUDIT" -> AuditLogsView(
+                            logs = auditLogs
+                        )
+                        "NOTIFICATIONS" -> NotificationsView(
+                            notifications = notifications,
+                            onMarkRead = { viewModel.markNotificationRead(it) }
+                        )
                     }
-                    "ARENA" -> GameArenaView(
-                        currentUser = user,
-                        viewModel = viewModel,
-                        games = activeGames
-                    )
-                    "LEDGER" -> LedgerView(
-                        transactions = transactions,
-                        currentUserId = user.id
-                    )
-                    "AUDIT" -> AuditLogsView(
-                        logs = auditLogs
-                    )
-                    "NOTIFICATIONS" -> NotificationsView(
-                        notifications = notifications,
-                        onMarkRead = { viewModel.markNotificationRead(it) }
-                    )
                 }
             }
-        }
 
-        if (showProfileDialog) {
-            ProfileDialog(
-                user = user,
-                onDismiss = { showProfileDialog = false },
-                onLogout = { viewModel.logout() }
-            )
+            if (showProfileDialog) {
+                ProfileDialog(
+                    user = user,
+                    onDismiss = { showProfileDialog = false },
+                    onLogout = { viewModel.logout() }
+                )
+            }
         }
     }
 }
