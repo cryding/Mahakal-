@@ -36,6 +36,12 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
     private val _activeTab = MutableStateFlow("HOME")
     val activeTab: StateFlow<String> = _activeTab.asStateFlow()
 
+    private val _reconciliationReport = MutableStateFlow<Map<String, Any>?>(null)
+    val reconciliationReport: StateFlow<Map<String, Any>?> = _reconciliationReport.asStateFlow()
+
+    private val _securityDashboard = MutableStateFlow<Map<String, Any>?>(null)
+    val securityDashboard: StateFlow<Map<String, Any>?> = _securityDashboard.asStateFlow()
+
     init {
         viewModelScope.launch {
             repository.bootstrapInitialData()
@@ -47,6 +53,7 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
                 _currentUser.value = sessionUser
                 if (sessionUser != null) {
                     refreshCurrentUser()
+                    syncFromBackend(sessionUser.role)
                 }
             } catch (_: Exception) {
                 _currentUser.value = null
@@ -58,6 +65,24 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
 
     fun setTab(tab: String) {
         _activeTab.value = tab
+    }
+
+    fun syncFromBackend(role: String? = null) {
+        val userRole = role ?: _currentUser.value?.role ?: return
+        viewModelScope.launch {
+            repository.syncServerData(userRole)
+            if (userRole == "ADMIN") {
+                val repRes = repository.getReconciliationReport()
+                if (repRes.isSuccess) {
+                    _reconciliationReport.value = repRes.getOrNull()
+                }
+                val secRes = repository.getSecurityDashboard()
+                if (secRes.isSuccess) {
+                    _securityDashboard.value = secRes.getOrNull()
+                }
+            }
+            refreshCurrentUser()
+        }
     }
 
     fun login(username: String, pass: String) {
@@ -79,6 +104,7 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
                     _activeTab.value = "HOME"
                     _snackbarMessage.emit("Welcome, ${user.fullName}")
                     refreshCurrentUser()
+                    syncFromBackend(user.role)
                 } else {
                     _snackbarMessage.emit("Invalid credentials. Please verify your ID and password.")
                 }
@@ -95,6 +121,8 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
             repository.logout()
             _currentUser.value = null
             _activeTab.value = "HOME"
+            _reconciliationReport.value = null
+            _securityDashboard.value = null
             _snackbarMessage.emit("Logged out securely")
         }
     }
@@ -236,6 +264,36 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
                 refreshCurrentUser()
             } else {
                 _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Transfer failed")
+            }
+        }
+    }
+
+    fun deductCoins(targetUserId: String, amount: Long, reason: String) {
+        val actor = _currentUser.value ?: return
+        if (actor.role !in listOf("ADMIN", "AGENT")) {
+            viewModelScope.launch {
+                _snackbarMessage.emit("Only Administrators and Agents can deduct coins")
+            }
+            return
+        }
+        viewModelScope.launch {
+            val res = repository.deductCoins(actor, targetUserId, amount, reason)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Successfully deducted $amount coins")
+                refreshCurrentUser()
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Deduction failed")
+            }
+        }
+    }
+
+    fun changePassword(oldPass: String, newPass: String) {
+        viewModelScope.launch {
+            val res = repository.changePassword(oldPass, newPass)
+            if (res.isSuccess) {
+                _snackbarMessage.emit("Password changed successfully")
+            } else {
+                _snackbarMessage.emit(res.exceptionOrNull()?.message ?: "Failed to change password")
             }
         }
     }

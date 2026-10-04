@@ -43,6 +43,18 @@ interface MahakalApiService {
         @Body request: Map<String, Any>
     ): Response<ServerResponse<Map<String, Any>>>
 
+    @POST("v1/wallets/deduct")
+    suspend fun deductVirtualCoins(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body request: Map<String, Any>
+    ): Response<ServerResponse<Map<String, Any>>>
+
+    @GET("v1/admin/reports/reconciliation")
+    suspend fun getReconciliationReport(): Response<ServerResponse<Map<String, Any>>>
+
+    @POST("v1/auth/change-password")
+    suspend fun changePassword(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
+
     @GET("v1/games")
     suspend fun getGames(): Response<ServerResponse<List<Map<String, Any>>>>
 
@@ -100,6 +112,6 @@ interface MahakalApiService {
     @GET("v1/notifications")
     suspend fun getNotifications(): Response<ServerResponse<List<Map<String, Any>>>>
 
-    @POST("v1/notifications/read")
+    @POST("v1/notifications/mark-read")
     suspend fun markNotificationRead(@Body request: Map<String, Any>): Response<ServerResponse<Map<String, Any>>>
 }

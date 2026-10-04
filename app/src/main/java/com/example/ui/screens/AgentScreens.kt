@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +19,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -45,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.UserEntity
 import com.example.ui.theme.BorderStroke
+import com.example.ui.theme.CrimsonRed
+import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurfaceCard
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.GoldLight
@@ -64,6 +69,8 @@ fun AgentDashboardView(
 ) {
     var showOnboardDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf<UserEntity?>(null) }
+    var showDeductDialog by remember { mutableStateOf<UserEntity?>(null) }
+    var showUserDetailsDialog by remember { mutableStateOf<UserEntity?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         BalanceCard(
@@ -85,28 +92,40 @@ fun AgentDashboardView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "DOWNLINE PLAYERS (${downlineUsers.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = GoldLight,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Button(
-                        onClick = { showOnboardDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("onboard_user_fab")
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("ONBOARD PLAYER", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Column {
+                        Text(
+                            text = "MY SUBORDINATED USERS (${downlineUsers.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = GoldLight,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Isolated downline under Regional Agent @${agent.username}",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { viewModel.syncFromBackend("AGENT") }) {
+                            Icon(Icons.Default.CloudSync, contentDescription = "Sync", tint = GoldPrimary)
+                        }
+                        Button(
+                            onClick = { showOnboardDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("onboard_user_fab")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("ONBOARD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
             items(downlineUsers) { player ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clickable { showUserDetailsDialog = player },
                     colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
                     shape = RoundedCornerShape(12.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
@@ -133,12 +152,12 @@ fun AgentDashboardView(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(EmeraldGreen.copy(alpha = 0.2f))
+                                    .background(if (player.status == "ACTIVE") EmeraldGreen.copy(alpha = 0.2f) else CrimsonRed.copy(alpha = 0.2f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = player.status,
-                                    color = EmeraldGreen,
+                                    color = if (player.status == "ACTIVE") EmeraldGreen else CrimsonRed,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -162,13 +181,32 @@ fun AgentDashboardView(
                                 )
                             }
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(
-                                    onClick = { showTransferDialog = player },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                                    onClick = { showUserDetailsDialog = player },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = TextSecondary),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
-                                    Text("CREDIT COINS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("INFO", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { showTransferDialog = player },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text("CREDIT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { showDeductDialog = player },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = CrimsonRed),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text("DEDUCT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -311,6 +349,75 @@ fun AgentDashboardView(
                     Text("CANCEL", color = TextSecondary)
                 }
             }
+        )
+    }
+
+    // Deduct Dialog
+    showDeductDialog?.let { targetUser ->
+        var deductAmount by remember { mutableStateOf("1000") }
+        var reason by remember { mutableStateOf("Agent Balance Recall") }
+        AlertDialog(
+            onDismissRequest = { showDeductDialog = null },
+            containerColor = DarkSurfaceCard,
+            title = { Text("Deduct Coins from Player", color = CrimsonRed, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Player: ${targetUser.fullName} (@${targetUser.username})", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Current Balance: ${formatCoins(targetUser.balance)}", color = GoldLight, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = deductAmount,
+                        onValueChange = { deductAmount = it },
+                        label = { Text("Amount of Coins") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth().testTag("agent_deduct_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CrimsonRed,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    OutlinedTextField(
+                        value = reason,
+                        onValueChange = { reason = it },
+                        label = { Text("Reason / Note") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CrimsonRed,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amt = deductAmount.toLongOrNull() ?: 0L
+                        if (amt > 0) {
+                            viewModel.deductCoins(targetUser.id, amt, reason)
+                            showDeductDialog = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed, contentColor = Color.White)
+                ) {
+                    Text("CONFIRM DEDUCT", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeductDialog = null }) {
+                    Text("CANCEL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // User Details Dialog
+    showUserDetailsDialog?.let { targetUser ->
+        UserDetailsDialog(
+            user = targetUser,
+            onDismiss = { showUserDetailsDialog = null }
         )
     }
 }

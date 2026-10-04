@@ -21,14 +21,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -46,6 +56,7 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +69,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.GameEntity
@@ -89,11 +102,18 @@ fun AdminDashboardView(
     games: List<GameEntity>
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("AGENTS", "GAMES", "OVERVIEW")
+    val tabTitles = listOf("OVERVIEW", "AGENTS", "USERS", "GAMES", "ANALYTICS", "COIN MGMT", "REPORTS", "SETTINGS")
+
+    val transactions by viewModel.allTransactions.collectAsState()
+    val reconciliationReport by viewModel.reconciliationReport.collectAsState()
+    val securityDashboard by viewModel.securityDashboard.collectAsState()
 
     var showMintDialog by remember { mutableStateOf(false) }
     var showCreateAgentDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf<UserEntity?>(null) }
+    var showDeductDialog by remember { mutableStateOf<UserEntity?>(null) }
+    var showUserDetailsDialog by remember { mutableStateOf<UserEntity?>(null) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showCreateGameDialog by remember { mutableStateOf(false) }
     var showEditGameDialog by remember { mutableStateOf<GameEntity?>(null) }
     var showConfigApiDialog by remember { mutableStateOf<GameEntity?>(null) }
@@ -110,11 +130,12 @@ fun AdminDashboardView(
             }
         )
 
-        // Tab Navigation
-        TabRow(
+        // Scrollable Tab Navigation across all 8 Admin modules
+        ScrollableTabRow(
             selectedTabIndex = selectedTab,
             containerColor = DarkBackground,
             contentColor = GoldPrimary,
+            edgePadding = 12.dp,
             indicator = { tabPositions ->
                 TabRowDefaults.SecondaryIndicator(
                     modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
@@ -131,7 +152,7 @@ fun AdminDashboardView(
                         Text(
                             text = title,
                             fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = if (selectedTab == index) GoldPrimary else TextSecondary
                         )
                     }
@@ -140,13 +161,31 @@ fun AdminDashboardView(
         }
 
         when (selectedTab) {
-            0 -> AdminAgentsList(
+            0 -> AdminOverviewTab(
+                admin = admin,
+                agentCount = agents.size,
+                userCount = users.size,
+                totalCirculating = admin.balance + agents.sumOf { it.balance } + users.sumOf { it.balance }
+            )
+            1 -> AdminAgentsList(
                 agents = agents,
                 onAddAgent = { showCreateAgentDialog = true },
                 onTransferCoins = { showTransferDialog = it },
-                onToggleStatus = { agent -> viewModel.toggleAgentStatus(agent) }
+                onDeductCoins = { showDeductDialog = it },
+                onToggleStatus = { agent -> viewModel.toggleAgentStatus(agent) },
+                onViewDetails = { showUserDetailsDialog = it }
             )
-            1 -> AdminGamesList(
+            2 -> AdminUsersList(
+                users = users,
+                onTransferCoins = { showTransferDialog = it },
+                onDeductCoins = { showDeductDialog = it },
+                onToggleStatus = { user ->
+                    val newSt = if (user.status == "ACTIVE") "DISABLED" else "ACTIVE"
+                    viewModel.toggleUserStatus(user.id, newSt)
+                },
+                onViewDetails = { showUserDetailsDialog = it }
+            )
+            3 -> AdminGamesList(
                 games = games,
                 onCreateGame = { showCreateGameDialog = true },
                 onEditGame = { showEditGameDialog = it },
@@ -157,11 +196,27 @@ fun AdminDashboardView(
                 onConfigApi = { showConfigApiDialog = it },
                 onDeclareResult = { showDeclareResultDialog = it }
             )
-            2 -> AdminOverviewTab(
+            4 -> AdminGameAnalyticsTab(
+                games = games,
+                transactions = transactions
+            )
+            5 -> AdminCoinsTab(
                 admin = admin,
-                agentCount = agents.size,
-                userCount = users.size,
-                totalCirculating = admin.balance + agents.sumOf { it.balance } + users.sumOf { it.balance }
+                agents = agents,
+                users = users,
+                onMintCoins = { showMintDialog = true },
+                onTransferCoins = { if (agents.isNotEmpty()) showTransferDialog = agents.first() },
+                onDeductCoins = { if (agents.isNotEmpty()) showDeductDialog = agents.first() }
+            )
+            6 -> AdminReportsTab(
+                reconciliationReport = reconciliationReport,
+                securityDashboard = securityDashboard,
+                onRefresh = { viewModel.syncFromBackend("ADMIN") }
+            )
+            7 -> AdminSettingsTab(
+                admin = admin,
+                onChangePassword = { showChangePasswordDialog = true },
+                onSyncServer = { viewModel.syncFromBackend("ADMIN") }
             )
         }
     }
@@ -345,6 +400,147 @@ fun AdminDashboardView(
             },
             dismissButton = {
                 TextButton(onClick = { showTransferDialog = null }) {
+                    Text("CANCEL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Deduct Dialog
+    showDeductDialog?.let { targetUser ->
+        var deductAmount by remember { mutableStateOf("1000") }
+        var reason by remember { mutableStateOf("Administrative Deduction") }
+        AlertDialog(
+            onDismissRequest = { showDeductDialog = null },
+            containerColor = DarkSurfaceCard,
+            title = { Text("Deduct Virtual Coins", color = CrimsonRed, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Target: ${targetUser.fullName} (@${targetUser.username})", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Current Balance: ${formatCoins(targetUser.balance)}", color = GoldLight, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = deductAmount,
+                        onValueChange = { deductAmount = it },
+                        label = { Text("Amount of Coins") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth().testTag("deduct_amount_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CrimsonRed,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    OutlinedTextField(
+                        value = reason,
+                        onValueChange = { reason = it },
+                        label = { Text("Reason / Audit Note") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CrimsonRed,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amt = deductAmount.toLongOrNull() ?: 0L
+                        if (amt > 0) {
+                            viewModel.deductCoins(targetUser.id, amt, reason)
+                            showDeductDialog = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed, contentColor = Color.White)
+                ) {
+                    Text("CONFIRM DEDUCTION", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeductDialog = null }) {
+                    Text("CANCEL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // User/Agent Details Dialog
+    showUserDetailsDialog?.let { targetUser ->
+        UserDetailsDialog(
+            user = targetUser,
+            onDismiss = { showUserDetailsDialog = null }
+        )
+    }
+
+    // Change Password Dialog
+    if (showChangePasswordDialog) {
+        var currentPass by remember { mutableStateOf("") }
+        var newPass by remember { mutableStateOf("") }
+        var isCurrentPassVisible by remember { mutableStateOf(false) }
+        var isNewPassVisible by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showChangePasswordDialog = false },
+            containerColor = DarkSurfaceCard,
+            title = { Text("Change Admin Password", color = GoldPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = currentPass,
+                        onValueChange = { currentPass = it },
+                        label = { Text("Current Password") },
+                        visualTransformation = if (isCurrentPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { isCurrentPassVisible = !isCurrentPassVisible }) {
+                                Icon(if (isCurrentPassVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    OutlinedTextField(
+                        value = newPass,
+                        onValueChange = { newPass = it },
+                        label = { Text("New Password (min 8 chars)") },
+                        visualTransformation = if (isNewPassVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { isNewPassVisible = !isNewPassVisible }) {
+                                Icon(if (isNewPassVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = BorderStroke,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (currentPass.isNotBlank() && newPass.length >= 8) {
+                            viewModel.changePassword(currentPass, newPass)
+                            showChangePasswordDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
+                ) {
+                    Text("UPDATE PASSWORD", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChangePasswordDialog = false }) {
                     Text("CANCEL", color = TextSecondary)
                 }
             }
@@ -674,7 +870,9 @@ fun AdminAgentsList(
     agents: List<UserEntity>,
     onAddAgent: () -> Unit,
     onTransferCoins: (UserEntity) -> Unit,
-    onToggleStatus: (UserEntity) -> Unit
+    onDeductCoins: (UserEntity) -> Unit,
+    onToggleStatus: (UserEntity) -> Unit,
+    onViewDetails: (UserEntity) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -707,7 +905,7 @@ fun AdminAgentsList(
 
         items(agents) { agent ->
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().clickable { onViewDetails(agent) },
                 colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
                 shape = RoundedCornerShape(12.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
@@ -763,14 +961,32 @@ fun AdminAgentsList(
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { onViewDetails(agent) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = TextSecondary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("INFO", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
                             Button(
                                 onClick = { onTransferCoins(agent) },
                                 colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
-                                Text("CREDIT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("CREDIT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { onDeductCoins(agent) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = CrimsonRed),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("DEDUCT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Button(
@@ -782,7 +998,7 @@ fun AdminAgentsList(
                                 border = androidx.compose.foundation.BorderStroke(1.dp, if (agent.status == "ACTIVE") CrimsonRed else EmeraldGreen),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
-                                Text(if (agent.status == "ACTIVE") "DISABLE" else "ENABLE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(if (agent.status == "ACTIVE") "DISABLE" else "ENABLE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1043,4 +1259,504 @@ fun MetricCard(
             Text(text = value, fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
         }
     }
+}
+
+@Composable
+fun AdminUsersList(
+    users: List<UserEntity>,
+    onTransferCoins: (UserEntity) -> Unit,
+    onDeductCoins: (UserEntity) -> Unit,
+    onToggleStatus: (UserEntity) -> Unit,
+    onViewDetails: (UserEntity) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "REGISTERED USERS DIRECTORY (${users.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = GoldLight,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        items(users) { player ->
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { onViewDetails(player) },
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = player.fullName,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "@${player.username} • Agent: ${player.agentId ?: "DIRECT/ROOT"}",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (player.status == "ACTIVE") EmeraldGreen.copy(alpha = 0.2f) else CrimsonRed.copy(alpha = 0.2f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = player.status,
+                                color = if (player.status == "ACTIVE") EmeraldGreen else CrimsonRed,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("COIN BALANCE", fontSize = 10.sp, color = TextMuted)
+                            Text(
+                                text = NumberFormat.getNumberInstance(Locale.US).format(player.balance) + " COINS",
+                                color = GoldPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { onViewDetails(player) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = TextSecondary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("INFO", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { onTransferCoins(player) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("CREDIT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { onDeductCoins(player) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = CrimsonRed),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("DEDUCT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { onToggleStatus(player) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (player.status == "ACTIVE") CrimsonRed.copy(alpha = 0.2f) else EmeraldGreen.copy(alpha = 0.2f),
+                                    contentColor = if (player.status == "ACTIVE") CrimsonRed else EmeraldGreen
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (player.status == "ACTIVE") CrimsonRed else EmeraldGreen),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(if (player.status == "ACTIVE") "DISABLE" else "ENABLE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminGameAnalyticsTab(
+    games: List<GameEntity>,
+    transactions: List<com.example.data.local.entity.TransactionEntity>
+) {
+    val totalEntriesCount = transactions.count { it.type == "USER_GAME_ENTRY" }
+    val totalCoinsEntered = transactions.filter { it.type == "USER_GAME_ENTRY" }.sumOf { it.amount }
+    val totalCoinsWon = transactions.filter { it.type == "USER_GAME_WIN" }.sumOf { it.amount }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "GAME PARTICIPATION & CONTEST ANALYTICS",
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldLight,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard(
+                    title = "TOTAL ENTRIES",
+                    value = "$totalEntriesCount",
+                    modifier = Modifier.weight(1f)
+                )
+                MetricCard(
+                    title = "COINS ENTERED",
+                    value = NumberFormat.getNumberInstance(Locale.US).format(totalCoinsEntered),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard(
+                    title = "COINS PAID (WINS)",
+                    value = NumberFormat.getNumberInstance(Locale.US).format(totalCoinsWon),
+                    modifier = Modifier.weight(1f)
+                )
+                MetricCard(
+                    title = "ACTIVE CONTESTS",
+                    value = "${games.count { it.status == "OPEN" }}",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            Text(
+                text = "CONTEST DETAILS & MULTIPLIERS",
+                style = MaterialTheme.typography.titleSmall,
+                color = GoldPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        items(games) { game ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(game.title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (game.status == "OPEN") EmeraldGreen.copy(alpha = 0.2f) else CrimsonRed.copy(alpha = 0.2f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(game.status, color = if (game.status == "OPEN") EmeraldGreen else CrimsonRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Category: ${game.category} • Multiplier: ${game.multiplier}x", color = GoldLight, fontSize = 12.sp)
+                    Text("Stake Limits: ${game.minCoins} - ${game.maxCoins} coins", color = TextSecondary, fontSize = 11.sp)
+                    if (game.winningOption != null) {
+                        Text("Outcome: Winner [${game.winningOption}]", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminCoinsTab(
+    admin: UserEntity,
+    agents: List<UserEntity>,
+    users: List<UserEntity>,
+    onMintCoins: () -> Unit,
+    onTransferCoins: () -> Unit,
+    onDeductCoins: () -> Unit
+) {
+    val totalAgentCoins = agents.sumOf { it.balance }
+    val totalUserCoins = users.sumOf { it.balance }
+    val netCirculating = admin.balance + totalAgentCoins + totalUserCoins
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "COIN CIRCULATION & TREASURY VAULT",
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldLight,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Text("MASTER TREASURY BALANCE", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = NumberFormat.getNumberInstance(Locale.US).format(admin.balance) + " COINS",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                        color = GoldPrimary
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onMintCoins,
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("MINT COINS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = onTransferCoins,
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("TRANSFER", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MetricCard(
+                    title = "AGENTS RESERVE",
+                    value = NumberFormat.getNumberInstance(Locale.US).format(totalAgentCoins),
+                    modifier = Modifier.weight(1f)
+                )
+                MetricCard(
+                    title = "USERS RESERVE",
+                    value = NumberFormat.getNumberInstance(Locale.US).format(totalUserCoins),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            MetricCard(
+                title = "TOTAL CIRCULATING COINS (ENTIRE ECOSYSTEM)",
+                value = NumberFormat.getNumberInstance(Locale.US).format(netCirculating),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+fun AdminReportsTab(
+    reconciliationReport: Map<String, Any>?,
+    securityDashboard: Map<String, Any>?,
+    onRefresh: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "AUTHORITATIVE SYSTEM REPORTS",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = GoldLight,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = GoldPrimary)
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("LEDGER RECONCILIATION AUDIT", fontWeight = FontWeight.Bold, color = GoldPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (reconciliationReport != null) {
+                        Text("Status: ${reconciliationReport["status"] ?: "BALANCED_HEALTHY"}", color = EmeraldGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Total Circulating Coins: ${reconciliationReport["totalCirculatingCoins"] ?: 0}", color = TextPrimary, fontSize = 12.sp)
+                        Text("Total System Accounts: ${reconciliationReport["totalAccounts"] ?: 0}", color = TextPrimary, fontSize = 12.sp)
+                        Text("Total Ledger Transactions: ${reconciliationReport["totalTransactions"] ?: 0}", color = TextPrimary, fontSize = 12.sp)
+                        Text("Currency Model: ${reconciliationReport["currencyModel"] ?: "NON_MONETARY_VIRTUAL_COINS"}", color = TextSecondary, fontSize = 11.sp)
+                    } else {
+                        Text("Fetching authoritative report from server...", color = TextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("SECURITY & ACTIVE SESSIONS", fontWeight = FontWeight.Bold, color = GoldPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (securityDashboard != null) {
+                        Text("Active Bearer Sessions: ${securityDashboard["activeSessionsCount"] ?: 0}", color = EmeraldGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        val recentEvents = securityDashboard["recentEvents"] as? List<*>
+                        Text("Recent Security Events: ${recentEvents?.size ?: 0}", color = TextPrimary, fontSize = 12.sp)
+                    } else {
+                        Text("Connecting to security telemetry on server...", color = TextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminSettingsTab(
+    admin: UserEntity,
+    onChangePassword: () -> Unit,
+    onSyncServer: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "SYSTEM SETTINGS & CLOUD CONNECTIVITY",
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldLight,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("AUTHORITATIVE CLOUD BACKEND", fontWeight = FontWeight.Bold, color = GoldPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Endpoint: https://mahakal-qo14.onrender.com", color = TextPrimary, fontSize = 12.sp)
+                    Text("Database: PostgreSQL 17.6 on Supabase (SCRAM-SHA-256 over TLS)", color = TextSecondary, fontSize = 11.sp)
+                    Text("Authority: Strict Server Authority (Room is client cache only)", color = EmeraldGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = onSyncServer,
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("FORCE SYNC ALL SERVER STATE", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderStroke)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("ADMIN SECURITY CREDENTIALS", fontWeight = FontWeight.Bold, color = GoldPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Logged in as @${admin.username} (${admin.fullName})", color = TextPrimary, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = onChangePassword,
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("CHANGE ADMIN PASSWORD", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UserDetailsDialog(
+    user: UserEntity,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceCard,
+        title = { Text("${user.role} Account Details", color = GoldPrimary, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Full Name: ${user.fullName}", color = TextPrimary, fontWeight = FontWeight.Bold)
+                Text("Username / Login ID: @${user.username}", color = TextSecondary, fontSize = 13.sp)
+                Text("Account UUID: ${user.id}", color = TextMuted, fontSize = 11.sp)
+                Text("Role: ${user.role}", color = GoldLight, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Account Status: ${user.status}", color = if (user.status == "ACTIVE") EmeraldGreen else CrimsonRed, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Holding Balance: ${formatCoins(user.balance)}", color = GoldPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (user.agentId != null) {
+                    Text("Parent Agent Node: ${user.agentId}", color = TextSecondary, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
+            ) {
+                Text("CLOSE", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
