@@ -37,6 +37,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.core.network.MahakalRetrofitClient
+import com.example.core.network.SessionManager
+import com.example.core.security.SecureTokenStorage
 import com.example.data.local.MahakalDatabase
 import com.example.data.repository.MahakalRepository
 import com.example.ui.screens.AdminDashboardView
@@ -64,8 +67,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val db = MahakalDatabase.getInstance(applicationContext)
-        val repository = MahakalRepository(db)
+        val app = application as? MahakalApplication
+        val repository = app?.repository ?: run {
+            val tokenStorage = SecureTokenStorage(applicationContext)
+            val sessionManager = SessionManager(tokenStorage)
+            val apiService = MahakalRetrofitClient.create(tokenStorage)
+            val db = MahakalDatabase.getInstance(applicationContext)
+            MahakalRepository(db, apiService, sessionManager, tokenStorage)
+        }
         val factory = MahakalViewModel.Factory(repository)
 
         setContent {

@@ -132,12 +132,7 @@ class MahakalRepository(
                 logout()
                 return null
             } catch (_: Exception) {
-                // Network error with stored credentials - check local cache only if active token exists
-                val cached = userDao.getUserById(userId)
-                if (cached != null && cached.status == "ACTIVE") {
-                    return cached
-                }
-                logout()
+                // Network error or server unreachable: Do NOT authenticate from Room
                 return null
             }
         }
