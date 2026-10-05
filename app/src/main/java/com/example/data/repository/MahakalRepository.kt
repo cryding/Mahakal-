@@ -40,50 +40,7 @@ class MahakalRepository(
      * CRITICAL: NEVER seeds default ADMIN, AGENT, or USER accounts.
      */
     suspend fun bootstrapInitialData() {
-        // Pre-populate standard contest types into local cache if empty
-        val existingGame = gameDao.getGameById("game_matka_single_01")
-        if (existingGame == null) {
-            val game1 = GameEntity(
-                id = "game_matka_single_01",
-                title = "Kalyan Single Ank [0-9]",
-                category = "MATKA_SINGLE",
-                minCoins = 100,
-                maxCoins = 10000,
-                multiplier = 9.5,
-                status = "OPEN"
-            )
-            val game2 = GameEntity(
-                id = "game_jodi_01",
-                title = "Rajdhani Supreme Jodi [00-99]",
-                category = "JODI_PAIR",
-                minCoins = 50,
-                maxCoins = 5000,
-                multiplier = 90.0,
-                status = "OPEN"
-            )
-            val game3 = GameEntity(
-                id = "game_dice_roll_01",
-                title = "Mahakal Royal Dice Roll [1-6]",
-                category = "LUCKY_DICE",
-                minCoins = 50,
-                maxCoins = 25000,
-                multiplier = 5.5,
-                status = "OPEN"
-            )
-            val game4 = GameEntity(
-                id = "game_color_wheel_01",
-                title = "Tri-Color Mystic Wheel [Red, Green, Blue]",
-                category = "COLOR_WHEEL",
-                minCoins = 100,
-                maxCoins = 50000,
-                multiplier = 2.8,
-                status = "OPEN"
-            )
-            gameDao.insertGame(game1)
-            gameDao.insertGame(game2)
-            gameDao.insertGame(game3)
-            gameDao.insertGame(game4)
-        }
+        // Room is strictly cache-only. No default mock users, games, or balances are seeded.
     }
 
     /**
@@ -809,24 +766,7 @@ class MahakalRepository(
     }
 
     suspend fun mintTreasuryCoins(admin: UserEntity, amount: Long): Result<Unit> {
-        if (amount <= 0) return Result.failure(Exception("Amount must be positive"))
-        userDao.addBalance(admin.id, amount)
-
-        txDao.insertTransaction(
-            TransactionEntity(
-                id = "tx_" + UUID.randomUUID().toString().take(10),
-                actorId = admin.id,
-                actorRole = "ADMIN",
-                sourceUserId = "MINT_VAULT",
-                destinationUserId = admin.id,
-                sourceName = "Central Mint Authority",
-                destinationName = "Treasury Reserve",
-                amount = amount,
-                type = "TREASURY_MINT",
-                description = "Minted $amount new virtual coins into master platform treasury"
-            )
-        )
-        return Result.success(Unit)
+        return Result.failure(Exception("Platform coins are authoritative and treasury-backed. Ad-hoc minting is disabled on production backend."))
     }
 
     suspend fun toggleUserStatus(actor: UserEntity, targetUserId: String, newStatus: String): Result<Unit> {

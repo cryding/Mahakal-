@@ -123,7 +123,6 @@ fun AdminDashboardScreen(
         "10. Profile"
     )
 
-    var showMintDialog by remember { mutableStateOf(false) }
     var showCreateAgentDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf<UserEntity?>(null) }
     var showDeductDialog by remember { mutableStateOf<UserEntity?>(null) }
@@ -197,7 +196,6 @@ fun AdminDashboardScreen(
         ) {
             BalanceCard(
                 user = admin,
-                onMintCoins = { showMintDialog = true },
                 onTransferCoins = {
                     if (agents.isNotEmpty()) {
                         showTransferDialog = agents.first()
@@ -265,7 +263,6 @@ fun AdminDashboardScreen(
                     admin = admin,
                     agents = agents,
                     users = users,
-                    onMintCoins = { showMintDialog = true },
                     onTransferCoins = { if (agents.isNotEmpty()) showTransferDialog = agents.first() },
                     onDeductCoins = { if (agents.isNotEmpty()) showDeductDialog = agents.first() }
                 )
@@ -303,55 +300,6 @@ fun AdminDashboardScreen(
                 )
             }
         }
-    }
-
-    // Mint Dialog
-    if (showMintDialog) {
-        var mintAmount by remember { mutableStateOf("1000000") }
-        AlertDialog(
-            onDismissRequest = { showMintDialog = false },
-            containerColor = DarkSurfaceCard,
-            title = { Text("Mint Virtual Coins", color = GoldPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Inject fresh coins into the master platform treasury.", color = TextSecondary, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = mintAmount,
-                        onValueChange = { mintAmount = it },
-                        label = { Text("Coin Amount") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth().testTag("mint_amount_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = GoldPrimary,
-                            unfocusedBorderColor = BorderStroke,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val amt = mintAmount.toLongOrNull() ?: 0L
-                        if (amt > 0) {
-                            viewModel.mintTreasuryCoins(amt)
-                            showMintDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
-                    modifier = Modifier.testTag("confirm_mint_button")
-                ) {
-                    Text("CONFIRM MINT", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showMintDialog = false }) {
-                    Text("CANCEL", color = TextSecondary)
-                }
-            }
-        )
     }
 
     // Appoint Agent Dialog
@@ -1620,7 +1568,7 @@ fun AdminGameAnalyticsTab(
                         Icon(Icons.Default.Info, contentDescription = null, tint = CrimsonRed, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Analytics API not available",
+                            text = "Game analytics are not currently available.",
                             fontWeight = FontWeight.Bold,
                             color = CrimsonRed,
                             fontSize = 15.sp
@@ -1628,14 +1576,14 @@ fun AdminGameAnalyticsTab(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Missing Backend Endpoint: GET /v1/admin/games/analytics (or /v1/analytics/games)",
+                        text = "Analytics API is not configured on the production server.",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "The production backend does not currently provide a dedicated analytics aggregation service. Fake/mock analytics have been strictly prohibited. Displaying real server-defined contest configurations and active bounds below.",
+                        text = "The backend does not provide an analytics aggregation endpoint. Zero mock/fake statistics are fabricated. Displaying live server-configured contests below.",
                         color = TextSecondary,
                         fontSize = 11.sp,
                         lineHeight = 16.sp
@@ -1693,7 +1641,6 @@ fun AdminCoinsTab(
     admin: UserEntity,
     agents: List<UserEntity>,
     users: List<UserEntity>,
-    onMintCoins: () -> Unit,
     onTransferCoins: () -> Unit,
     onDeductCoins: () -> Unit
 ) {
@@ -1733,19 +1680,19 @@ fun AdminCoinsTab(
                     Spacer(modifier = Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
-                            onClick = onMintCoins,
+                            onClick = onTransferCoins,
                             colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("MINT COINS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("TRANSFER COINS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                         Button(
-                            onClick = onTransferCoins,
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = GoldPrimary),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
+                            onClick = onDeductCoins,
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground, contentColor = CrimsonRed),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("TRANSFER", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("RECALL COINS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
                 }

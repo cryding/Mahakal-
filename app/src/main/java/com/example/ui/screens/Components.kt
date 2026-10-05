@@ -163,7 +163,6 @@ fun AppHeader(
 @Composable
 fun BalanceCard(
     user: UserEntity,
-    onMintCoins: (() -> Unit)? = null,
     onTransferCoins: (() -> Unit)? = null
 ) {
     Card(
@@ -238,52 +237,20 @@ fun BalanceCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                if (onTransferCoins != null && user.role in listOf("ADMIN", "AGENT")) {
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (onMintCoins != null && user.role == "ADMIN") {
-                        Surface(
-                            onClick = onMintCoins,
-                            shape = RoundedCornerShape(10.dp),
-                            color = GoldPrimary,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .testTag("mint_coins_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.MonetizationOn,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "MINT COINS",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-
-                    if (onTransferCoins != null && user.role in listOf("ADMIN", "AGENT")) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Surface(
                             onClick = onTransferCoins,
                             shape = RoundedCornerShape(10.dp),
                             color = if (user.role == "ADMIN") DarkBackground else GoldPrimary,
                             border = if (user.role == "ADMIN") androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary) else null,
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .height(42.dp)
                                 .testTag("transfer_coins_button")
                         ) {
