@@ -74,6 +74,7 @@ fun LoginScreen(viewModel: MahakalViewModel) {
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     val isLoading by viewModel.isLoading.collectAsState()
+    val loginError by viewModel.loginError.collectAsState()
 
     Box(
         modifier = Modifier
@@ -183,6 +184,16 @@ fun LoginScreen(viewModel: MahakalViewModel) {
                         unfocusedTextColor = TextPrimary
                     )
                 )
+
+                if (loginError != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = loginError!!,
+                        color = CrimsonRed,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth().testTag("login_error")
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
