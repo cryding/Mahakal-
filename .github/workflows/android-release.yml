@@ -132,8 +132,8 @@ jobs:
           ver_code = re.search(r'versionCode\s*=\s*([0-9]+)', gradle_content)
           
           assert app_id and app_id.group(1) == 'com.aistudio.mahakal.ledger', f'Application ID mismatch: {app_id.group(1) if app_id else None}'
-          assert ver_name and ver_name.group(1) == '1.0', f'Version Name mismatch: {ver_name.group(1) if ver_name else None}'
-          assert ver_code and ver_code.group(1) == '1', f'Version Code mismatch: {ver_code.group(1) if ver_code else None}'
+          assert ver_name and ver_name.group(1) == '1.0.2', f'Version Name mismatch: {ver_name.group(1) if ver_name else None}'
+          assert ver_code and ver_code.group(1) == '3', f'Version Code mismatch: {ver_code.group(1) if ver_code else None}'
           
           # Verify production API URL in release buildType
           assert 'https://mahakal-qo14.onrender.com' in gradle_content, 'Production API URL not configured in build.gradle.kts'
