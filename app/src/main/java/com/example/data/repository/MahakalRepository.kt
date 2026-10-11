@@ -164,7 +164,14 @@ class MahakalRepository(
                 if (e.message?.contains("suspended", ignoreCase = true) == true) {
                     throw e
                 }
-                return null
+                // Preserve a useful diagnostic for the login UI instead of silently
+                // converting every network, TLS, or response-parsing failure to "invalid credentials".
+                throw Exception(
+                    e.message?.takeIf { it.isNotBlank() }
+                        ?.let { "Login service error: $it" }
+                        ?: "Login service error: check your internet connection and try again.",
+                    e
+                )
             }
         }
         return null
