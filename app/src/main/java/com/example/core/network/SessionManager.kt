@@ -19,39 +19,29 @@ sealed class AuthState {
     data class Error(val message: String, val statusCode: Int? = null) : AuthState()
 }
 
+/**
+ * In-memory authentication state.
+ *
+ * Stored session metadata is only a hint for locating a token; it is never proof
+ * of authentication. Only a successful login response or a server-validated
+ * /v1/auth/me response may call setAuthenticated().
+ */
 class SessionManager(private val secureStorage: SecureTokenStorage) {
 
-    private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-    init {
-        restoreSession()
-    }
-
+    /**
+     * Deliberately does not restore AuthState from local preferences.
+     * The repository must validate any persisted access token with the backend
+     * before an authenticated state can be established.
+     */
     private fun restoreSession() {
-        val token = secureStorage.getAccessToken()
-        val userId = secureStorage.getSessionUserId()
-        val loginId = secureStorage.getSessionLoginId()
-        val role = secureStorage.getSessionRole()
-        if (token != null && userId != null && loginId != null && role != null) {
-            val fullName = secureStorage.getSessionFullName() ?: loginId
-            _authState.value = AuthState.Authenticated(
-                user = UserProfileDto(
-                    id = userId,
-                    loginId = loginId,
-                    role = role,
-                    status = "ACTIVE",
-                    fullName = fullName,
-                    mustChangePassword = false
-                ),
-                token = token
-            )
-        } else {
-            _authState.value = AuthState.Unauthenticated
-        }
+        _authState.value = AuthState.Unauthenticated
     }
 
     fun setAuthenticated(user: UserProfileDto, accessToken: String, refreshToken: String) {
+        // Call only after a successful login or successful server profile validation.
         secureStorage.saveTokens(
             accessToken = accessToken,
             refreshToken = refreshToken,
@@ -60,7 +50,10 @@ class SessionManager(private val secureStorage: SecureTokenStorage) {
             role = user.role,
             fullName = user.fullName
         )
-        if (user.mustChangePassword) {
+        if (user.status != "ACTIVE") {
+            secureStorage.clearSession()
+            _authState.value = AuthState.Unauthenticated
+        } else if (user.mustChangePassword) {
             _authState.value = AuthState.PasswordChangeRequired(user)
         } else {
             _authState.value = AuthState.Authenticated(user, accessToken)
