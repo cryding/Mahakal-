@@ -30,6 +30,9 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _loginError = MutableStateFlow<String?>(null)
+    val loginError: StateFlow<String?> = _loginError.asStateFlow()
+
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage = _snackbarMessage.asSharedFlow()
 
@@ -95,10 +98,11 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
             return
         }
 
+        _loginError.value = null
         _isLoading.value = true
         viewModelScope.launch {
             try {
-                val user = repository.authenticate(trimmedUser, trimmedPass)
+                val user = repository.authenticate(trimmedUser, pass)
                 if (user != null) {
                     _currentUser.value = user
                     _activeTab.value = "HOME"
@@ -106,10 +110,13 @@ class MahakalViewModel(private val repository: MahakalRepository) : ViewModel() 
                     refreshCurrentUser()
                     syncFromBackend(user.role)
                 } else {
-                    _snackbarMessage.emit("Invalid credentials. Please verify your ID and password.")
+                    _loginError.value = "Login failed. Check your ID/password, or try again later if the server is unavailable."
+                    _snackbarMessage.emit(_loginError.value!!)
                 }
             } catch (e: Exception) {
-                _snackbarMessage.emit(e.message ?: "Authentication failed. Please verify connection.")
+                val message = e.message?.takeIf { it.isNotBlank() } ?: "Could not reach the login service. Check your internet connection and try again."
+                _loginError.value = message
+                _snackbarMessage.emit(message)
             } finally {
                 _isLoading.value = false
             }
